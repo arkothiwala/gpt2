@@ -73,7 +73,7 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
         unique_last_tokens = set([tokens[-1] for tokens in self.tokens])
         print(f"Unique last tokens: {unique_last_tokens}")
         assert len(unique_last_tokens) == 1, "All sequences should end with <|endoftext|> token"
-        self.tokens_flattened = list(itertools.chain.from_iterable(self.tokens))
+        self.tokens_flattened = torch.tensor(list(itertools.chain.from_iterable(self.tokens)))
 
         batch_encode_end_time = time.time()
         print(f"num_thread = {num_threads} \t| raw_data_load_time = {round(dataloader_end_time-dataloader_start_time, 4)} \t| tokenizer_batch_encode_time = {round(batch_encode_end_time-batch_encode_start_time, 4)}")
@@ -88,13 +88,15 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
     def __getitem__(self, index):
         start_idx = index*self.max_seq_len
         end_idx = (index+1)*self.max_seq_len
-        if end_idx >= len(self.tokens_flattened):
+        if end_idx >= len(self.tokens_flattened)-1:
             start_idx = len(self.tokens_flattened) - self.max_seq_len - 1
             end_idx = len(self.tokens_flattened) - 1
         x = self.tokens_flattened[start_idx:end_idx]
         y = self.tokens_flattened[start_idx+1:end_idx+1]
         
         # mask the loss for the tokens which are after <|endoftext|> token, because those tokens are not actually seen by the model during training, and we don't want the model to learn from those tokens.
-        EOT_mask = (x == self.tokenizer._special_tokens.get("<|endoftext|>"))
+        # this will make it slow though due to finding EOT mask for each sequence
+        EOT_mask = (x == self.tokenizer.eot_token)
+        # print(f"EOT_Mask | x = {x[EOT_mask]} | y = {y[EOT_mask]}")
         y[EOT_mask] = -100
-        return torch.tensor(x), torch.tensor(y)
+        return x, y
