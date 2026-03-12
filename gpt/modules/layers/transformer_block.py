@@ -80,8 +80,9 @@ class TransformerBlock(torch.nn.Module):
             query=x_layer_norm_mha, 
             key=x_layer_norm_mha, 
             value=x_layer_norm_mha, 
-            attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1).bool(),
+            attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1).bool(), # not using is_causal=True because because using it along with need_weights=True is leading to silent or loud failures based on the pytorch version.
             need_weights=True,
+            key_padding_mask=None # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
         )
         x_post_mha = x + x_post_mha
         
@@ -103,7 +104,7 @@ class GPT2Model(torch.nn.Module):
             num_embeddings=self.vocab_size,
             embedding_dim=self.d_model,
             padding_idx=None,
-            max_norm=1,
+            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
         self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model)
