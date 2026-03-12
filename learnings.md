@@ -18,3 +18,9 @@ MHA:
 - Identified a bug in torch -> if is_causal=True and need_weights=True [by default] => it would not apply causal mask and fail silently
     - option 1 - either set need_weights=False
     - [used this] option 2 - create causal mask and pass it in the attn_mask
+- was doing `if self.MHA.in_proj_weight:` this throws error as boolean comparison goes for a toss when the tensor has a value -> should use `self.MHA.in_proj_weight is not None` instead because torch has a native support to check None
+
+Position Encoding:
+- was returning numpy array instead of torch.tensor -> leading to issue when doing sum b/w tensor and ndarray
+- was passing input X instead of input X's seq_len
+- when creating torch.tensor() had to set dtype to float32 because torch by default set dtype to float32 v/s numpy sets it to float64 or double which makes operations incompatible
