@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from functools import lru_cache
 class SinusoidalPositionalEmbeddings(torch.nn.Module):
     def __init__(self, n_dim):
         super().__init__()
@@ -24,9 +25,10 @@ class SinusoidalPositionalEmbeddings(torch.nn.Module):
     #         cos_op = self.get_cos_wave(idx)*(np.arange(self.n_dim)%2)
     #         return sine_op+cos_op
 
+    @lru_cache(maxsize=None)
     def forward(self, seq_len):
         output = np.zeros(shape=(seq_len, self.n_dim))
         idx = np.arange(start=0, stop=seq_len, step=1).reshape(-1,1)
         output[:,::2] = self.get_sine_wave(idx)
         output[:,1::2] = self.get_cos_wave(idx)
-        return output[:seq_len, :]
+        return torch.tensor(output[:seq_len, :], dtype=torch.float32)
