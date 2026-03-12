@@ -24,3 +24,8 @@ Position Encoding:
 - was returning numpy array instead of torch.tensor -> leading to issue when doing sum b/w tensor and ndarray
 - was passing input X instead of input X's seq_len
 - when creating torch.tensor() had to set dtype to float32 because torch by default set dtype to float32 v/s numpy sets it to float64 or double which makes operations incompatible
+- was using fixed sinusoidal embeddings [as in attention is all you need] -> GPT2 is using learnd embeedings instead
+
+Embeddings:
+- max_norm can be left None unless the training is unstable
+- was creating another layer in the last layer to translate d_model to vocab_size. This will blow up the parameter space. GPT1 and GPT2 uses the same embedding metrics transpose for it.
