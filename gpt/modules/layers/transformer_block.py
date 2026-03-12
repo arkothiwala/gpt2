@@ -22,13 +22,15 @@ class CustomLayerNorm(torch.nn.Module):
 class TransformerBlock(torch.nn.Module):
 
     def __init__(self, d_model, n_heads, attention_dropout=0.2, scaling_factor=1, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.d_model = d_model
         self.n_heads = n_heads
         self.MHA = torch.nn.MultiheadAttention(
             embed_dim=self.d_model, 
             num_heads=self.n_heads,
             dropout=attention_dropout,
-            bias=True
+            bias=True,
+            batch_first=True
         )
         self.FFN = torch.nn.Sequential(collections.OrderedDict([
             ("linear_expansion", torch.nn.Linear(in_features=d_model, out_features=4*d_model, bias=True)),
@@ -51,7 +53,15 @@ class TransformerBlock(torch.nn.Module):
         #     parameter.data.mul_(scaling_factor)
 
         # scale only weights correctly
-        self.MHA.in_proj_weight.data.mul_(scaling_factor)
+        # MISTAKE - Earlier I had scaled only in_proj_weight practically limiting the scenario where MHA is using separate q_proj_weight, k_proj_weight and v_proj_weight instead of combined in_proj_weight. This is because in some versions of PyTorch, MultiheadAttention uses separate projection weights for query, key and value instead of combined projection weight.
+        if self.MHA.in_proj_weight:
+            self.MHA.in_proj_weight.data.mul_(scaling_factor)
+        if self.MHA.q_proj_weight:
+            self.MHA.q_proj_weight.data.mul_(scaling_factor)
+        if self.MHA.k_proj_weight:
+            self.MHA.k_proj_weight.data.mul_(scaling_factor)
+        if self.MHA.v_proj_weight:
+            self.MHA.v_proj_weight.data.mul_(scaling_factor)
         self.MHA.out_proj.weight.data.mul_(scaling_factor)
         self.FFN.linear_expansion.weight.data.mul_(scaling_factor)
         self.FFN.linear_projection.weight.data.mul_(scaling_factor)
@@ -59,9 +69,21 @@ class TransformerBlock(torch.nn.Module):
         self.layer_norm_mha = CustomLayerNorm(d_model=self.d_model)
         self.layer_norm_ffn = CustomLayerNorm(d_model=self.d_model)
 
+
     def forward(self, x):
+        batch_size, seq_len, d_model = x.shape
         x_layer_norm_mha = self.layer_norm_mha(x)
-        x_post_mha = x + self.MHA(x_layer_norm_mha)
+        # MISTAKE - initially I had not provided separate query, key and values arguments. Also, I wasn't selecting first value
+        # This was because in my custom implementation of MHA, I wasn't taking three inputs in MHA.
+        x_post_mha, attention = self.MHA(
+            query=x_layer_norm_mha, 
+            key=x_layer_norm_mha, 
+            value=x_layer_norm_mha, 
+            attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1).bool(),
+            need_weights=True,
+        )
+        x_post_mha = x + x_post_mha
+        
 
         x_layer_norm_ffn = self.layer_norm_ffn(x_post_mha)
         x_post_ffn = x_post_mha + self.FFN(x_layer_norm_ffn)

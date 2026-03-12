@@ -11,3 +11,10 @@
 MHA:
 - I was initally thinking k_dim and v_dim as the dimensions on which we want embedding dimensions to project. It wasn't true. It is the dimensions in which one can expect K and V tensors to originally have shape. MHA internally projects them to match d_model dimensions
 - I had applied scaling for MHA weights by torch.sqrt(1/self.n_layers) where as it should have been torch.sqrt(1/(2*self.n_layers)) because the network will have 2*self.n_layers number of residual blocks. Each block is increasing variance hence we need to normalise accordingly. Another way to think is FFN weight normalization is taking care of two residual connections - one before and one after the FFN
+- Silly mistake -> I had not set `batch_first = True` explicitly and torch set `batch_first = False` by default
+- In forward pass, I didn't pass x for all query, key and value arguments -> apperently they are different due to common API for MHA
+- had not applied causal_mask which I realised later when I was preparing for the training.
+- MHA returns two values -> post MHA output, and actual attention
+- Identified a bug in torch -> if is_causal=True and need_weights=True [by default] => it would not apply causal mask and fail silently
+    - option 1 - either set need_weights=False
+    - [used this] option 2 - create causal mask and pass it in the attn_mask
