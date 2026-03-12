@@ -1,5 +1,6 @@
 import torch
 import collections
+import numpy as np
 from gpt.modules.embedding.sinusoidal import SinusoidalPositionalEmbeddings
 
 class CustomLayerNorm(torch.nn.Module):
@@ -55,13 +56,13 @@ class TransformerBlock(torch.nn.Module):
 
         # scale only weights correctly
         # MISTAKE - Earlier I had scaled only in_proj_weight practically limiting the scenario where MHA is using separate q_proj_weight, k_proj_weight and v_proj_weight instead of combined in_proj_weight. This is because in some versions of PyTorch, MultiheadAttention uses separate projection weights for query, key and value instead of combined projection weight.
-        if self.MHA.in_proj_weight:
+        if self.MHA.in_proj_weight is not None:
             self.MHA.in_proj_weight.data.mul_(scaling_factor)
-        if self.MHA.q_proj_weight:
+        if self.MHA.q_proj_weight is not None:
             self.MHA.q_proj_weight.data.mul_(scaling_factor)
-        if self.MHA.k_proj_weight:
+        if self.MHA.k_proj_weight is not None:
             self.MHA.k_proj_weight.data.mul_(scaling_factor)
-        if self.MHA.v_proj_weight:
+        if self.MHA.v_proj_weight is not None:
             self.MHA.v_proj_weight.data.mul_(scaling_factor)
         self.MHA.out_proj.weight.data.mul_(scaling_factor)
         self.FFN.linear_expansion.weight.data.mul_(scaling_factor)
@@ -93,7 +94,8 @@ class TransformerBlock(torch.nn.Module):
         
 
 class GPT2Model(torch.nn.Module):
-    def __init__(self, d_model, n_heads, n_layers, vocab_size):
+    def __init__(self, d_model, n_heads, n_layers, vocab_size, *args, **kwargs):
+        super().__init__(*args, **kwargs)
         self.d_model = d_model
         self.n_heads = n_heads
         self.n_layers = n_layers
@@ -107,9 +109,9 @@ class GPT2Model(torch.nn.Module):
             max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
-        self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model)
+        self.position_embedding = SinusoidalPositionalEmbeddings(n_dim=self.d_model)
         # add sequential layers
-        for layer in self.n_layers:
+        for layer in range(self.n_layers):
             self.transformer_layers.append(TransformerBlock(d_model=self.d_model, n_heads=self.n_heads, scaling_factor=1/np.sqrt(2*self.n_layers)))
         # add final layer normalization
         self.transformer_layers.append(self.final_layer_norm)
@@ -118,8 +120,9 @@ class GPT2Model(torch.nn.Module):
 
 
     def forward(self, x, return_proba = False):
+        batch_size, seq_len = x.shape
         x_learnt_embeddings = self.embedding(x)
-        x_pos_embeddings = self.position_embedding(x)
+        x_pos_embeddings = self.position_embedding(seq_len)
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
         x_logits = self.transformer_layers(x_embeddings)
         if return_proba:
