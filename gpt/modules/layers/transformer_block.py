@@ -94,12 +94,13 @@ class TransformerBlock(torch.nn.Module):
         
 
 class GPT2Model(torch.nn.Module):
-    def __init__(self, d_model, n_heads, n_layers, vocab_size, *args, **kwargs):
+    def __init__(self, d_model, n_heads, n_layers, vocab_size, context_length, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.d_model = d_model
         self.n_heads = n_heads
         self.n_layers = n_layers
         self.vocab_size = vocab_size
+        self.context_length = context_length
         self.transformer_layers = torch.nn.Sequential()
         self.final_layer_norm = CustomLayerNorm(d_model=self.d_model)
         self.embedding = torch.nn.Embedding(
@@ -116,15 +117,15 @@ class GPT2Model(torch.nn.Module):
         # add final layer normalization
         self.transformer_layers.append(self.final_layer_norm)
         # predict token with softmax
-        self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
+        # self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
 
 
     def forward(self, x, return_proba = False):
-        batch_size, seq_len = x.shape
         x_learnt_embeddings = self.embedding(x)
-        x_pos_embeddings = self.position_embedding(seq_len)
+        x_pos_embeddings = self.position_embedding(self.context_length)
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
         x_logits = self.transformer_layers(x_embeddings)
+        x_logits = x_logits@self.embedding.weight.T
         if return_proba:
             return torch.nn.functional.softmax(input=x_logits, dim=-1)
         else:
