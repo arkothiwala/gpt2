@@ -1,0 +1,10 @@
+- Data
+    - raw data - openweb data [english, cleaned, deduplicated with LSH, min tokens criteria, only text]
+    - dataset class
+    - dataloader
+    - should we use processors like in CNNs?
+    - prepare training data
+- Tokenizer
+    - Use tiktokenizer
+- Architecture
+- Training job

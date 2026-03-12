@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+dist/
+build/
+.eggs/
+
+# Virtual env
+.venv/
+venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
+
+# Env files
+.env
+.env.*
+
+# Prometheus
+metric_logs/
+
+# Models / data
+models/
+tests/data/*
+!tests/data/.gitignore
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Docker
+*.tar
+
+# AWS
+.aws/
