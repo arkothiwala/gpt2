@@ -1,6 +1,6 @@
 import torch
 import collections
-
+from gpt.modules.embedding.sinusoidal import SinusoidalPositionalEmbeddings
 
 class CustomLayerNorm(torch.nn.Module):
     def __init__(self, d_model, eps=1e-5, *args, **kwargs):
@@ -14,6 +14,7 @@ class CustomLayerNorm(torch.nn.Module):
         mean = x.mean(dim=-1, keepdim=True)
         # unbiased=False because we want to divide by N instead of N-1, because we are calculating the variance for the entire population (the sequence) and not a sample of the population.
         # torch by default uses unbiased=True, which divides by N-1, so we need to set it to False to divide by N. Leading to incorrect results and mismatch with torch.nn.LayerNorm results.
+        # MISTAKE - initially I had not set it to false there for results weren't matching with torch.nn.LayerNorm
         var = x.var(dim=-1, keepdim=True, unbiased=False)
         x_normalized = (x-mean)/torch.sqrt(var + self.eps)
         x_normalized = (x_normalized*self.weight)+self.bias
@@ -88,3 +89,39 @@ class TransformerBlock(torch.nn.Module):
         x_layer_norm_ffn = self.layer_norm_ffn(x_post_mha)
         x_post_ffn = x_post_mha + self.FFN(x_layer_norm_ffn)
         return x_post_ffn
+        
+
+class GPT2Model(torch.nn.Module):
+    def __init__(self, d_model, n_heads, n_layers, vocab_size):
+        self.d_model = d_model
+        self.n_heads = n_heads
+        self.n_layers = n_layers
+        self.vocab_size = vocab_size
+        self.transformer_layers = torch.nn.Sequential()
+        self.final_layer_norm = CustomLayerNorm(d_model=self.d_model)
+        self.embedding = torch.nn.Embedding(
+            num_embeddings=self.vocab_size,
+            embedding_dim=self.d_model,
+            padding_idx=None,
+            max_norm=1,
+            norm_type=2
+        )
+        self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model)
+        # add sequential layers
+        for layer in self.n_layers:
+            self.transformer_layers.append(TransformerBlock(d_model=self.d_model, n_heads=self.n_heads, scaling_factor=1/np.sqrt(2*self.n_layers)))
+        # add final layer normalization
+        self.transformer_layers.append(self.final_layer_norm)
+        # predict token with softmax
+        self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
+
+
+    def forward(self, x, return_proba = False):
+        x_learnt_embeddings = self.embedding(x)
+        x_pos_embeddings = self.position_embedding(x)
+        x_embeddings = x_learnt_embeddings + x_pos_embeddings
+        x_logits = self.transformer_layers(x_embeddings)
+        if return_proba:
+            return torch.nn.functional.softmax(input=x_logits, dim=-1)
+        else:
+            return x_logits
