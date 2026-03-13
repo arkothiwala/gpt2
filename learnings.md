@@ -20,12 +20,14 @@ MHA:
     - [used this] option 2 - create causal mask and pass it in the attn_mask
 - was doing `if self.MHA.in_proj_weight:` this throws error as boolean comparison goes for a toss when the tensor has a value -> should use `self.MHA.in_proj_weight is not None` instead because torch has a native support to check None
 - I misunderstood the scaling factor for residual layers and was scaling all the weights -> we need to just scale the residual connection weights which are out projection layer from MHA and FFN.
+- while applying scaling I did `self.MHA.out_proj.weight.data.mul_(scaling_factor)` -> doing weight.data.mul_ bypasses torch's autograd engine. this is discouraged in torch
 
 Position Encoding:
 - was returning numpy array instead of torch.tensor -> leading to issue when doing sum b/w tensor and ndarray
 - was passing input X instead of input X's seq_len
 - when creating torch.tensor() had to set dtype to float32 because torch by default set dtype to float32 v/s numpy sets it to float64 or double which makes operations incompatible
 - was using fixed sinusoidal embeddings [as in attention is all you need] -> GPT2 is using learnd embeedings instead
+- use register_buffer - I am calculating torch.triu for each forward pass for each layer -> this can make it super slow -> better to register at initialization and use it as required by the current seq_len
 
 Embeddings:
 - max_norm can be left None unless the training is unstable
