@@ -127,6 +127,7 @@ class GPT2Model(torch.nn.Module):
             max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
+        self.dropout = torch.nn.Dropout(p=0.1)
 
 
     def forward(self, x, return_proba = False):
@@ -134,7 +135,8 @@ class GPT2Model(torch.nn.Module):
         # x_pos_embeddings = self.position_embedding(self.context_length)
         x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=self.context_length).to(x.device))
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
-        x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1)
+        # x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1) # MISTAKE - I had initially used functional dropout here w/o train v/s inference mode check. Moving it to Dropout module which internally manages train v/s inference mode and also makes code cleaner.
+        x_embeddings = self.dropout(x_embeddings)
         x_logits = self.transformer_layers(x_embeddings)
         x_logits = x_logits@self.embedding.weight.T
         if return_proba:

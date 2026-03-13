@@ -19,6 +19,7 @@ MHA:
     - option 1 - either set need_weights=False
     - [used this] option 2 - create causal mask and pass it in the attn_mask
 - was doing `if self.MHA.in_proj_weight:` this throws error as boolean comparison goes for a toss when the tensor has a value -> should use `self.MHA.in_proj_weight is not None` instead because torch has a native support to check None
+- I misunderstood the scaling factor for residual layers and was scaling all the weights -> we need to just scale the residual connection weights which are out projection layer from MHA and FFN.
 
 Position Encoding:
 - was returning numpy array instead of torch.tensor -> leading to issue when doing sum b/w tensor and ndarray
@@ -29,3 +30,7 @@ Position Encoding:
 Embeddings:
 - max_norm can be left None unless the training is unstable
 - was creating another layer in the last layer to translate d_model to vocab_size. This will blow up the parameter space. GPT1 and GPT2 uses the same embedding metrics transpose for it.
+
+Dropout:
+- I was applying dropout w/o training v/s inference flag. This would have created dropout even in the inference mode [suboptimal]
+- **NN.module manage bunch of such things which torch.nn.functional does not. ALWAYS be SUPER careful while using torch.nn.functional over equivalent torch.nn.Module**
