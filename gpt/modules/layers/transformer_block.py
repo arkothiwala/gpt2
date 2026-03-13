@@ -2,31 +2,14 @@ import torch
 import collections
 import numpy as np
 from gpt.modules.embedding.sinusoidal import SinusoidalPositionalEmbeddings
-
-class CustomLayerNorm(torch.nn.Module):
-    def __init__(self, d_model, eps=1e-5, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.d_model = d_model
-        self.weight = torch.nn.Parameter(data=torch.ones(size=(self.d_model,)))
-        self.bias = torch.nn.Parameter(data=torch.zeros(size=(self.d_model,)))
-        self.eps = eps
-
-    def forward(self, x: torch.Tensor):
-        mean = x.mean(dim=-1, keepdim=True)
-        # unbiased=False because we want to divide by N instead of N-1, because we are calculating the variance for the entire population (the sequence) and not a sample of the population.
-        # torch by default uses unbiased=True, which divides by N-1, so we need to set it to False to divide by N. Leading to incorrect results and mismatch with torch.nn.LayerNorm results.
-        # MISTAKE - initially I had not set it to false there for results weren't matching with torch.nn.LayerNorm
-        var = x.var(dim=-1, keepdim=True, unbiased=False)
-        x_normalized = (x-mean)/torch.sqrt(var + self.eps)
-        x_normalized = (x_normalized*self.weight)+self.bias
-        return x_normalized
-
+from gpt.modules.norm.layernorm import CustomLayerNorm
 class TransformerBlock(torch.nn.Module):
 
-    def __init__(self, d_model, n_heads, attention_dropout=0.1, scaling_factor=1, *args, **kwargs):
+    def __init__(self, d_model, n_heads, context_length, attention_dropout=0.1, scaling_factor=1, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.d_model = d_model
         self.n_heads = n_heads
+        self.context_length = context_length
         self.MHA = torch.nn.MultiheadAttention(
             embed_dim=self.d_model, 
             num_heads=self.n_heads,
@@ -106,60 +89,3 @@ class TransformerBlock(torch.nn.Module):
         x_post_ffn = x_post_mha + self.FFN(x_layer_norm_ffn)
         return x_post_ffn
         
-
-class GPT2Model(torch.nn.Module):
-    def __init__(self, d_model, n_heads, n_layers, vocab_size, context_length, *args, **kwargs):
-        super().__init__(*args, **kwargs)
-        self.d_model = d_model
-        self.n_heads = n_heads
-        self.n_layers = n_layers
-        self.vocab_size = vocab_size
-        self.context_length = context_length
-        self.transformer_layers = torch.nn.Sequential()
-        self.final_layer_norm = CustomLayerNorm(d_model=self.d_model)
-        self.embedding = torch.nn.Embedding(
-            num_embeddings=self.vocab_size,
-            embedding_dim=self.d_model,
-            padding_idx=None,
-            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
-            norm_type=2
-        )
-        # self.position_embedding = SinusoidalPositionalEmbeddings(n_dim=self.d_model)
-        # add sequential layers
-        for layer in range(self.n_layers):
-            self.transformer_layers.append(
-                TransformerBlock(
-                    d_model=self.d_model, 
-                    n_heads=self.n_heads, 
-                    scaling_factor=1/np.sqrt(2*self.n_layers), 
-                    attention_dropout=0.1
-                )
-            )
-        # add final layer normalization
-        self.transformer_layers.append(self.final_layer_norm)
-        # predict token with softmax
-        # self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
-        self.learnt_position_embedding = torch.nn.Embedding(
-            num_embeddings=self.context_length,
-            embedding_dim=self.d_model,
-            padding_idx=None,
-            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
-            norm_type=2
-        )
-        self.dropout = torch.nn.Dropout(p=0.1)
-
-
-    def forward(self, x, return_proba = False):
-        batch_size, seq_len = x.shape
-        x_learnt_embeddings = self.embedding(x)
-        # x_pos_embeddings = self.position_embedding(self.context_length)
-        x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len).to(x.device))
-        x_embeddings = x_learnt_embeddings + x_pos_embeddings
-        # x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1) # MISTAKE - I had initially used functional dropout here w/o train v/s inference mode check. Moving it to Dropout module which internally manages train v/s inference mode and also makes code cleaner.
-        x_embeddings = self.dropout(x_embeddings)
-        x_logits = self.transformer_layers(x_embeddings)
-        x_logits = x_logits@self.embedding.weight.T
-        if return_proba:
-            return torch.nn.functional.softmax(input=x_logits, dim=-1)
-        else:
-            return x_logits
