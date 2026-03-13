@@ -23,7 +23,7 @@ class CustomLayerNorm(torch.nn.Module):
 
 class TransformerBlock(torch.nn.Module):
 
-    def __init__(self, d_model, n_heads, attention_dropout=0.2, scaling_factor=1, *args, **kwargs):
+    def __init__(self, d_model, n_heads, attention_dropout=0.1, scaling_factor=1, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.d_model = d_model
         self.n_heads = n_heads
@@ -38,6 +38,7 @@ class TransformerBlock(torch.nn.Module):
             ("linear_expansion", torch.nn.Linear(in_features=d_model, out_features=4*d_model, bias=True)),
             # Mistake - I had initially forgotten the activation layer
             ("activation", torch.nn.GELU()),
+            ("dropout", torch.nn.Dropout(p=0.1)),
             ("linear_projection", torch.nn.Linear(in_features=4*d_model, out_features=d_model, bias=True))
         ]))
 
@@ -56,17 +57,18 @@ class TransformerBlock(torch.nn.Module):
 
         # scale only weights correctly
         # MISTAKE - Earlier I had scaled only in_proj_weight practically limiting the scenario where MHA is using separate q_proj_weight, k_proj_weight and v_proj_weight instead of combined in_proj_weight. This is because in some versions of PyTorch, MultiheadAttention uses separate projection weights for query, key and value instead of combined projection weight.
-        if self.MHA.in_proj_weight is not None:
-            self.MHA.in_proj_weight.data.mul_(scaling_factor)
-        if self.MHA.q_proj_weight is not None:
-            self.MHA.q_proj_weight.data.mul_(scaling_factor)
-        if self.MHA.k_proj_weight is not None:
-            self.MHA.k_proj_weight.data.mul_(scaling_factor)
-        if self.MHA.v_proj_weight is not None:
-            self.MHA.v_proj_weight.data.mul_(scaling_factor)
+        # if self.MHA.in_proj_weight is not None:
+        #     self.MHA.in_proj_weight.data.mul_(scaling_factor)
+        # if self.MHA.q_proj_weight is not None:
+        #     self.MHA.q_proj_weight.data.mul_(scaling_factor)
+        # if self.MHA.k_proj_weight is not None:
+        #     self.MHA.k_proj_weight.data.mul_(scaling_factor)
+        # if self.MHA.v_proj_weight is not None:
+        #     self.MHA.v_proj_weight.data.mul_(scaling_factor)
         self.MHA.out_proj.weight.data.mul_(scaling_factor)
-        self.FFN.linear_expansion.weight.data.mul_(scaling_factor)
+        # self.FFN.linear_expansion.weight.data.mul_(scaling_factor)
         self.FFN.linear_projection.weight.data.mul_(scaling_factor)
+        # MISTAKE - I misunderstood the scaling factor and was scaling all the weights -> we need to just scale the residual connection weights which are out projection layer from MHA and FFN.
         
         self.layer_norm_mha = CustomLayerNorm(d_model=self.d_model)
         self.layer_norm_ffn = CustomLayerNorm(d_model=self.d_model)
@@ -81,7 +83,7 @@ class TransformerBlock(torch.nn.Module):
             query=x_layer_norm_mha, 
             key=x_layer_norm_mha, 
             value=x_layer_norm_mha, 
-            attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1).bool(), # not using is_causal=True because because using it along with need_weights=True is leading to silent or loud failures based on the pytorch version.
+            attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1).bool(), # not using is_causal=True because because using it along with need_weights=True is leading to silent or loud failures based on the pytorch version. Also, instead of float mask we are preparing boolean mask as it would consume much less memory, makes compute slightly faster and is recommended by PyTorch.
             need_weights=True,
             key_padding_mask=None # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
         )
@@ -113,17 +115,26 @@ class GPT2Model(torch.nn.Module):
         self.position_embedding = SinusoidalPositionalEmbeddings(n_dim=self.d_model)
         # add sequential layers
         for layer in range(self.n_layers):
-            self.transformer_layers.append(TransformerBlock(d_model=self.d_model, n_heads=self.n_heads, scaling_factor=1/np.sqrt(2*self.n_layers)))
+            self.transformer_layers.append(TransformerBlock(d_model=self.d_model, n_heads=self.n_heads, scaling_factor=1/np.sqrt(2*self.n_layers)), attention_dropout=0.1)
         # add final layer normalization
         self.transformer_layers.append(self.final_layer_norm)
         # predict token with softmax
         # self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
+        self.learnt_position_embedding = torch.nn.Embedding(
+            num_embeddings=self.context_length,
+            embedding_dim=self.d_model,
+            padding_idx=None,
+            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
+            norm_type=2
+        )
 
 
     def forward(self, x, return_proba = False):
         x_learnt_embeddings = self.embedding(x)
-        x_pos_embeddings = self.position_embedding(self.context_length)
+        # x_pos_embeddings = self.position_embedding(self.context_length)
+        x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=self.context_length).to(x.device))
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
+        x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1)
         x_logits = self.transformer_layers(x_embeddings)
         x_logits = x_logits@self.embedding.weight.T
         if return_proba:
