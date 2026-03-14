@@ -59,6 +59,7 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
     def __init__(self, raw_data_path, num_threads=os.cpu_count(), min_seq_len=1, max_seq_len=512, min_start_idx=0):
         # load the raw data
         dataloader_start_time = time.time()
+        # This will become a bottleneck if the raw data is too large
         self.raw_data_df = GPTDataUtils.load_raw_data(path=raw_data_path)#"assets/raw_data")
         dataloader_end_time = time.time()
         # print(f"time to load raw data = {round(dataloader_end_time-dataloader_start_time, 4)} seconds")
@@ -92,11 +93,12 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
             start_idx = len(self.tokens_flattened) - self.max_seq_len - 1
             end_idx = len(self.tokens_flattened) - 1
         x = self.tokens_flattened[start_idx:end_idx]
-        y = self.tokens_flattened[start_idx+1:end_idx+1]
+        # MISTAKE - didn't clone y tensor, which caused the original tokens_flattened tensor to be modified when we set the EOT_mask to -100
+        y = self.tokens_flattened[start_idx+1:end_idx+1].clone()
         
         # mask the loss for the tokens which are after <|endoftext|> token, because those tokens are not actually seen by the model during training, and we don't want the model to learn from those tokens.
         # this will make it slow though due to finding EOT mask for each sequence
         EOT_mask = (x == self.tokenizer.eot_token)
         # print(f"EOT_Mask | x = {x[EOT_mask]} | y = {y[EOT_mask]}")
-        y[EOT_mask] = -100
+        y[EOT_mask] = torch.tensor(-100) # -100 is the default ignore index for CrossEntropyLoss in PyTorch
         return x, y

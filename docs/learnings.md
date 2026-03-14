@@ -1,11 +1,16 @@
 1. Dataset creation:
     - Implemented random length and random start for training data. Later switched to random length, fixed start [thinking model may not learn well if it starts at a random location]
     - We can use tiktokenizer encode_batch with optimal no of threads to reduce the encode time [did benchmarking as well - benchmarking/tokeniser_batch_encode.py]
+    - in Dataset.init() I am creating copies of the data multiple times [] which would easily break with scale. Examples as following
+        - self.raw_data_df['text'] = self.raw_data_df['text'] + '<|endoftext|>'
+        - self.tokens = self.tokenizer.encode_batch(text=self.raw_data_df['text'], num_threads=num_threads,  allowed_special={"<|endoftext|>"})
+        - self.tokens_flattened = torch.tensor(list(itertools.chain.from_iterable(self.tokens)))
 1. Implemented masking when I shouldn't have
     - Implemeted dynamic length rnn masking [similar to done in timeseries V1 and V2], realised that this may not be correct. Checked whether one should use fixed length masking instead of dynamic given model context length is constant
     - Realised that for LLM pretraining we do fixed length **sequence packing**
 
     - I was applying masking to set prediction values to -100 where x was endoftext token => realised that I had applied EOT mask on list instead of tensor hence my code was breaking misrably
+    - `y[EOT_mask] = -100` was being done w/o creating clone of the tensor. This would modify `tokens_flattened` in place.
 
 
 MHA:
