@@ -67,14 +67,17 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
         # load the pretrained tokenizer by gpt2
         self.tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
 
-        self.raw_data_df['text'] = self.raw_data_df['text'] + '<|endoftext|>'
+        # MISTAKE - This would create a copy and then add <EOT> text
+        # self.raw_data_df['text'] = self.raw_data_df['text'] + '<|endoftext|>'
 
         batch_encode_start_time = time.time()
         self.tokens = self.tokenizer.encode_batch(text=self.raw_data_df['text'], num_threads=num_threads,  allowed_special={"<|endoftext|>"})
         unique_last_tokens = set([tokens[-1] for tokens in self.tokens])
         print(f"Unique last tokens: {unique_last_tokens}")
         assert len(unique_last_tokens) == 1, "All sequences should end with <|endoftext|> token"
-        self.tokens_flattened = torch.tensor(list(itertools.chain.from_iterable(self.tokens)))
+        # self.tokens_flattened = torch.tensor(list(itertools.chain.from_iterable(self.tokens)))
+        # LEARNING - This is faster than using itertools.chain.from_iterable, because it avoids creating an intermediate list of all tokens, and directly creates a tensor from the generator expression.
+        self.tokens_flattened = torch.tensor([x for sub in self.tokens for x in (*sub, 100)])
 
         batch_encode_end_time = time.time()
         print(f"num_thread = {num_threads} \t| raw_data_load_time = {round(dataloader_end_time-dataloader_start_time, 4)} \t| tokenizer_batch_encode_time = {round(batch_encode_end_time-batch_encode_start_time, 4)}")
