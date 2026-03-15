@@ -122,24 +122,17 @@ class GPTDatasetBinFile(torch.utils.data.Dataset):
         )
         
     def __len__(self):
-        return (self.data.shape[0]-1) // self.context_length
+        return (len(self.data)-1) // self.context_length
 
     def __getitem__(self, index):
         # check_1 - idx should not be less than or eq. len
-        assert index <= self.__len__()-1, "index out of bound"
+        assert 0 <= index < len(self), "index out of bound"
 
         # assign start and end index
         x_start_idx = index*self.context_length
         x_end_idx = (index+1)*self.context_length
         y_start_idx = x_start_idx + 1
         y_end_idx = x_end_idx + 1
-
-        # edge case handling where `data.shape[0]%context_length == 0`
-        if y_end_idx >= self.data.shape[0]:
-            x_start_idx -= 1
-            x_end_idx -= 1
-            y_start_idx -= 1
-            y_end_idx -= 1
 
         # MISTAKE | PERFORMANCE_IMPACT - below approach reads twice -> causing 2x disk pressure, 2x memory because for both we are doing astype(np.int64).
         # x = self.data[x_start_idx:x_end_idx].astype(np.int64)
@@ -155,6 +148,7 @@ class GPTDatasetBinFile(torch.utils.data.Dataset):
 
         # here we don't need to clone the y_tensor because we are doing .astype(np.int64) so original data in memmap is not modified.
         EOT_mask = (x_tensor == self.eot_token) # use the eot_token provided during initialization
-        y_tensor[EOT_mask] = torch.tensor(-100) # -100 is the default ignore index for CrossEntropyLoss in PyTorch
+        # MISTAKE | PERFORMANCE_IMPACT = was using torch.tensor(-100) which creates a new tensor on CPU every time, instead we can directly use -100 which will be broadcasted to the shape of y_tensor[EOT_mask]
+        y_tensor[EOT_mask] = -100 # -100 is the default ignore index for CrossEntropyLoss in PyTorch
 
         return x_tensor, y_tensor
