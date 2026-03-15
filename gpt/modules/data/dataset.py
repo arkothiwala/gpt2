@@ -141,11 +141,17 @@ class GPTDatasetBinFile(torch.utils.data.Dataset):
             y_start_idx -= 1
             y_end_idx -= 1
 
-        x = self.data[x_start_idx:x_end_idx].astype(np.int64)
-        y = self.data[y_start_idx:y_end_idx].astype(np.int64)
+        # MISTAKE | PERFORMANCE_IMPACT - below approach reads twice -> causing 2x disk pressure, 2x memory because for both we are doing astype(np.int64).
+        # x = self.data[x_start_idx:x_end_idx].astype(np.int64)
+        # y = self.data[y_start_idx:y_end_idx].astype(np.int64)
 
-        x_tensor = torch.from_numpy(x)
-        y_tensor = torch.from_numpy(y)
+        # x_tensor = torch.from_numpy(x)
+        # y_tensor = torch.from_numpy(y)
+
+        # This is better compared to above
+        xy_data = torch.from_numpy(self.data[x_start_idx:y_end_idx].astype(np.int64))
+        x_tensor, y_tensor = xy_data[:-1], xy_data[1:]
+
 
         # here we don't need to clone the y_tensor because we are doing .astype(np.int64) so original data in memmap is not modified.
         EOT_mask = (x_tensor == self.eot_token) # use the eot_token provided during initialization
