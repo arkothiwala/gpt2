@@ -111,21 +111,29 @@ class GPTDatasetBinFile(torch.utils.data.Dataset):
     def __init__(self, file_path, context_length, binfile_dtype, eot_token, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.context_length = context_length
+        self.file_path = file_path
+        self.binfile_dtype = binfile_dtype
         self.eot_token = eot_token
         
         assert os.path.splitext(file_path)[1] == '.bin', f"file_path must point to a .bin file. invalid file_path = {file_path}"
         # read the binary file and create memmap object
-        self.data = np.memmap(
-            filename=file_path,
-            dtype=binfile_dtype,
-            mode='r'
-        )
+        self.data = None
+
+    def ensure_memmap(self):
+        if self.data is None:
+            self.data = np.memmap(
+                filename=self.file_path, 
+                dtype=self.binfile_dtype, 
+                mode='r'
+            )
         
     def __len__(self):
+        self.ensure_memmap()
         # MISTAKE - initially didn't len(x)-1
         return (len(self.data)-1) // self.context_length
 
     def __getitem__(self, index):
+        self.ensure_memmap()
         # check_1 - idx should not be less than or eq. len
         assert 0 <= index < len(self), "index out of bound"
 
