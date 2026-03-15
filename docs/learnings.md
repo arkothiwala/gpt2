@@ -5,6 +5,7 @@
         - self.raw_data_df['text'] = self.raw_data_df['text'] + '<|endoftext|>'
         - self.tokens = self.tokenizer.encode_batch(text=self.raw_data_df['text'], num_threads=num_threads,  allowed_special={"<|endoftext|>"})
         - self.tokens_flattened = torch.tensor(list(itertools.chain.from_iterable(self.tokens)))
+    - BIN files - can be accessed w/o loading entire data in memory. This is crucial and important when we are training LLM on massive data. Earlier I was loading the entire parquet file in memory to prepare dataset and dataloader classes.
 1. Implemented masking when I shouldn't have
     - Implemeted dynamic length rnn masking [similar to done in timeseries V1 and V2], realised that this may not be correct. Checked whether one should use fixed length masking instead of dynamic given model context length is constant
     - Realised that for LLM pretraining we do fixed length **sequence packing**
