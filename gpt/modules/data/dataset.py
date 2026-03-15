@@ -105,3 +105,50 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
         # print(f"EOT_Mask | x = {x[EOT_mask]} | y = {y[EOT_mask]}")
         y[EOT_mask] = torch.tensor(-100) # -100 is the default ignore index for CrossEntropyLoss in PyTorch
         return x, y
+
+
+class GPTDatasetBinFile(torch.utils.data.Dataset):
+    def __init__(self, file_path, context_length, binfile_dtype, eot_token, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.context_length = context_length
+        self.eot_token = eot_token
+        
+        assert os.path.splitext(file_path)[1] == '.bin', f"file_path must point to a .bin file. invalid file_path = {file_path}"
+        # read the binary file and create memmap object
+        self.data = np.memmap(
+            filename=file_path,
+            dtype=binfile_dtype,
+            mode='r'
+        )
+        
+    def __len__(self):
+        return (self.data.shape[0]-1) // self.context_length
+
+    def __getitem__(self, index):
+        # check_1 - idx should not be less than or eq. len
+        assert index <= self.__len__()-1, "index out of bound"
+
+        # assign start and end index
+        x_start_idx = index*self.context_length
+        x_end_idx = (index+1)*self.context_length
+        y_start_idx = x_start_idx + 1
+        y_end_idx = x_end_idx + 1
+
+        # edge case handling where `data.shape[0]%context_length == 0`
+        if y_end_idx >= self.data.shape[0]:
+            x_start_idx -= 1
+            x_end_idx -= 1
+            y_start_idx -= 1
+            y_end_idx -= 1
+
+        x = self.data[x_start_idx:x_end_idx].astype(np.int64)
+        y = self.data[y_start_idx:y_end_idx].astype(np.int64)
+
+        x_tensor = torch.from_numpy(x)
+        y_tensor = torch.from_numpy(y)
+
+        # here we don't need to clone the y_tensor because we are doing .astype(np.int64) so original data in memmap is not modified.
+        EOT_mask = (x_tensor == self.eot_token) # use the eot_token provided during initialization
+        y_tensor[EOT_mask] = torch.tensor(-100) # -100 is the default ignore index for CrossEntropyLoss in PyTorch
+
+        return x_tensor, y_tensor
