@@ -122,6 +122,7 @@ class GPTDatasetBinFile(torch.utils.data.Dataset):
         )
         
     def __len__(self):
+        # MISTAKE - initially didn't len(x)-1
         return (len(self.data)-1) // self.context_length
 
     def __getitem__(self, index):
