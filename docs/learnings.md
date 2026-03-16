@@ -45,3 +45,6 @@ Embeddings:
 Dropout:
 - I was applying dropout w/o training v/s inference flag. This would have created dropout even in the inference mode [suboptimal]
 - **NN.module manage bunch of such things which torch.nn.functional does not. ALWAYS be SUPER careful while using torch.nn.functional over equivalent torch.nn.Module**
+
+Package:
+- Repo wasn't a package earlier. Worker initialization was failing with `no module named gpt` error. This wasn't an issue in the main thread because it was initialized from the repo's root folder
