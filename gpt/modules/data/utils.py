@@ -1,6 +1,8 @@
 import os
 import pyarrow.parquet as pq
 import tiktoken
+import torch
+import random
 import numpy as np
 from tqdm import tqdm
 tqdm.pandas()
@@ -63,18 +65,26 @@ class DataUtils:
         # (int64 is required because an offset index can easily exceed 4 billion)
         eot_offsets.astype(np.int64).tofile(output_index_path)
 
+    
+    @staticmethod
+    def worker_init_fn(worker_id):
+        seed = torch.initial_seed() % 2**32
+        np.random.seed(seed)
+        random.seed(seed)
+
 
 if __name__ == "__main__":
     tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
+    split = "train"
     DataUtils.tokenize_data(
         # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
-        raw_data_folder="/Users/ashutosh/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/plain_text",
-        output_binary_path="/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext.bin", 
+        raw_data_folder=f"/Users/ashutosh/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/{split}",
+        output_binary_path=f"/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext_{split}.bin", 
         tokenizer=tokenizer
     )
     DataUtils.create_eot_index(
-        tokenized_binary_path="/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext.bin",
+        tokenized_binary_path=f"/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext_{split}.bin",
         binfile_obj_dtype=np.uint16,
         query_value=tokenizer.eot_token,
-        output_index_path="/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext_eot_index.bin"
+        output_index_path=f"/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext_{split}_eot_index.bin"
     )
