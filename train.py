@@ -41,7 +41,7 @@ if __name__ == '__main__':
     ################################################
     # Setting common variables
     device = torch.device("cuda") if torch.cuda.is_available() else (torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu"))
-    device = 'cpu'
+    # device = 'cpu'
     cross_entropy_loss = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction='sum')
     global_batch_size = exp_config.get("training").get("global_batch_size")
     ################################################
@@ -201,17 +201,19 @@ if __name__ == '__main__':
 
             # MISTAKE - I wasn't assigning it back to the variable leading to `RuntimeError: Placeholder storage has not been allocated on MPS device!`
             batch_x_train = batch_x_train.to(device=device)
-            batch_y_train = batch_y_train.to(device=device)
+            # batch_y_train = batch_y_train.to(device=device)
 
             # print(f"batch_x_train.max() = {batch_x_train.max().max()}")
 
             # forward pass
             batch_logits = model(batch_x_train)
-            assert batch_logits.device == batch_y_train.device, f"batch_logits device {batch_logits.device} and batch_y_train device {batch_y_train.device} are not the same"
             # print(f"batch_logits.shape = {batch_logits.shape}")
             # print(f"batch_y_train.shape = {batch_y_train.shape}")
             # print(f"batch_y_train.max() = {batch_y_train.max().max()} | batch_y_train.min() = {batch_y_train.min()}")
             # micro_batch_loss = cross_entropy_loss(input=batch_logits.permute(0,2,1).contiguous(), target=batch_y_train)
+            batch_logits = batch_logits.to(device='cpu')
+            # batch_y_train = batch_y_train.to(device='cpu')
+            assert batch_logits.device == batch_y_train.device, f"batch_logits device {batch_logits.device} and batch_y_train device {batch_y_train.device} are not the same"
             micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
             # print(f"micro_batch_loss.shape = {micro_batch_loss.shape}")
             print(f"micro_batch_loss = {micro_batch_loss}")
@@ -220,11 +222,11 @@ if __name__ == '__main__':
 
             # handle gradient accumulation
             if total_accumulated % global_batch_size == 0:
+                print(f"global_batch_loss = {global_batch_loss}")
                 optimizer.step()
                 optimizer.zero_grad()
                 total_accumulated = 0
                 global_batch_loss = torch.tensor(0.0, requires_grad=False)
-                print(f"global_batch_loss = {global_batch_loss}")
 
         
         # update weights as of the last batch of the epoch

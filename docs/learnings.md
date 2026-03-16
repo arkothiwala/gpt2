@@ -48,3 +48,16 @@ Dropout:
 
 Package:
 - Repo wasn't a package earlier. Worker initialization was failing with `no module named gpt` error. This wasn't an issue in the main thread because it was initialized from the repo's root folder
+
+Loss:
+- cross_entropy_loss expects logits in (batch_size, categories, seq_len,...) format but we were providing it (batch_size, seq_len, categories...) causing failure in terms of expected shape mismatch error
+
+Trainings:
+- x.to(device) does not happen in_place -> need to assign it back
+- `y_tensor[EOT_mask] = -100` was causing issue in the CrossEntropyLoss w/o any proper error message
+- `y.clone()` needs to be done before setting `y[EOT_MASK] = -100` otherwise it updates the original tensor which cause out of index issue because there is no -100 index for embedidng layer
+- -100 could be causing issue in the BCE calculation [failed even in CPU with following error]
+    - `zsh: segmentation fault  python train.py --model_yaml`
+    - `zsh: bus error  python train.py --model_yaml`
+- using exp_config.get() can lead to breaking the code silently as bunch of parameters are passed as null and torch will have a default handling for it. use d[key] for such scenarios
+- The issue is well known that cross entropy loss with logits and labels is unstable for classes > 50000 with MPS. So, I moved the logits to CPU for loss calculation and it worked [per row it is 100 MB data -> with batchsize of 8 -> it's 800MB data that needs to be transferred for each batch]
