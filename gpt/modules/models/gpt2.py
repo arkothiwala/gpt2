@@ -46,6 +46,7 @@ class GPT2Model(torch.nn.Module):
 
 
     def forward(self, x, return_proba = False):
+        # print(f"x.shape = {x.shape}")
         batch_size, seq_len = x.shape
         x_learnt_embeddings = self.embedding(x)
         # x_pos_embeddings = self.position_embedding(self.context_length)
