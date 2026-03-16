@@ -160,7 +160,9 @@ class GPTDatasetBinFile(torch.utils.data.Dataset):
 
         # This is better compared to above
         xy_data = torch.from_numpy(self.data[x_start_idx:y_end_idx].astype(np.int64))
-        x_tensor, y_tensor = xy_data[:-1], xy_data[1:]
+        # MISTAKE - I didn't clone y_tensor thinking we aren't looking at self.data anymore
+        # HOWEVER, x_tensor and y_tensor both share the same xy_data -> so chaning value in y_tensor changes x_tensor as well leading to out of index error
+        x_tensor, y_tensor = xy_data[:-1], xy_data[1:].clone()
 
 
         # here we don't need to clone the y_tensor because we are doing .astype(np.int64) so original data in memmap is not modified.
