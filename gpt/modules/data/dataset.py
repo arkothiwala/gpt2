@@ -128,9 +128,17 @@ class GPTDatasetBinFile(torch.utils.data.Dataset):
             )
         
     def __len__(self):
-        self.ensure_memmap()
-        # MISTAKE - initially didn't len(x)-1
-        return (len(self.data)-1) // self.context_length
+        # self.ensure_memmap()
+        # # MISTAKE - initially didn't len(x)-1
+        # # return (len(self.data)-1) // self.context_length
+        # return (self.data.shape[0]-1) // self.context_length
+    
+        # MISTAKE - len(self) is called by the dataloader before spawning worker processes hence not serving the purpose of the lazy loading of memmap object
+        # ref - https://gemini.google.com/share/40b625502783
+        file_size_bytes = os.path.getsize(self.file_path)
+        element_size_bytes = np.dtype(self.binfile_dtype).itemsize
+        total_elements = file_size_bytes // element_size_bytes
+        return (total_elements-1) // self.context_length
 
     def __getitem__(self, index):
         self.ensure_memmap()
