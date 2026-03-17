@@ -9,11 +9,12 @@ from gpt.modules.data.dataset import GPTDatasetBinFile
 from gpt.modules.data.utils import DataUtils
 from torch.utils.data import DataLoader
 from tqdm import tqdm
-
+import os
+from datetime import datetime
 import logging
 
-# Set global level to DEBUG
-logging.basicConfig(level=logging.DEBUG)
+# Remove basicConfig to avoid conflict with custom handlers
+# logging.basicConfig(level=logging.DEBUG)
 
 # Specific override for a noisy library
 logging.getLogger('multiprocessing').setLevel(logging.INFO)
@@ -31,12 +32,36 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_yaml", help="configs/<exp_config>.yaml file path")
     args = parser.parse_args()
-    print(args)
-    print(args.model_yaml)
+
+    # Logging config
+    now = datetime.now()
+    log_dir = os.path.join("training_runs", now.strftime("%Y%m%d_%H%M%S"))
+    os.makedirs(log_dir, exist_ok=True)
+    log_file_path = os.path.join(log_dir, "model.log")
+
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.DEBUG)  # default level
+
+    c_handler = logging.StreamHandler()
+    f_handler = logging.FileHandler(log_file_path)
+
+    c_handler.setLevel(logging.INFO)
+    f_handler.setLevel(logging.DEBUG)
+
+    # Create formatters and add it to handlers
+    log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+    c_handler.setFormatter(log_format)
+    f_handler.setFormatter(log_format)
+
+    logger.addHandler(c_handler)
+    logger.addHandler(f_handler)
+    
+    logger.info(args)
+    logger.info(f"Loading config from: {args.model_yaml}")
 
     with open(args.model_yaml, "r") as f:
         exp_config = yaml.safe_load(f)
-        print(exp_config)
+        logger.debug(f"Config: {exp_config}")
 
     ################################################
     # Setting common variables
@@ -62,10 +87,10 @@ if __name__ == '__main__':
             context_length=exp_config.get("model").get("context_length"),
         )
     model.to(device)
-    print("loaded total {} parameters".format(sum(p.numel() for p in model.parameters())))
-    print(model.parameters)
-    print(f"Model parameters device: {next(model.parameters()).device}")
-    print(f"embedding parameters device: {next(model.get_submodule('embedding').parameters()).device}")
+    logger.info("loaded total {} parameters".format(sum(p.numel() for p in model.parameters())))
+    logger.debug(model.parameters)
+    logger.debug(f"Model parameters device: {next(model.parameters()).device}")
+    logger.debug(f"embedding parameters device: {next(model.get_submodule('embedding').parameters()).device}")
 
     
     ########################################################################
@@ -91,7 +116,7 @@ if __name__ == '__main__':
         binfile_dtype=np.uint16,
         eot_token=tokenizer.eot_token
     )
-    print("Datasets loaded successfully")
+    logger.info("Datasets loaded successfully")
     
     # Get the dataloaders
     train_dl = DataLoader(
@@ -156,12 +181,12 @@ if __name__ == '__main__':
     #########################################################################
 
     batch = next(iter(train_dl))
-    print(f"batch = {batch}")
-    print(f"batch shape = {batch[0].shape}")
+    logger.debug(f"batch = {batch}")
+    logger.debug(f"batch shape = {batch[0].shape}")
     batch[0] = batch[0].to(device)
     batch[1] = batch[1].to(device)
 
-    print(model(x=torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)).shape)
+    logger.debug(model(x=torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)).shape)
 
     ########################################################################
     #################### Optim + LR Scheduler Config #######################
@@ -215,7 +240,8 @@ if __name__ == '__main__':
     optimizer.zero_grad()
     
     # iterate through the micro_batch_size
-    for batch_x_train, batch_y_train in tqdm(train_dl, desc="epoch's batch progress"):
+    global_step = 0
+    for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_dl, desc="epoch's batch progress")):
         batch_size = batch_x_train.shape[0]
         total_accumulated += batch_size
 
@@ -238,7 +264,7 @@ if __name__ == '__main__':
         assert batch_logits.device == batch_y_train.device, f"batch_logits device {batch_logits.device} and batch_y_train device {batch_y_train.device} are not the same"
         micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
         # print(f"micro_batch_loss.shape = {micro_batch_loss.shape}")
-        print(f"micro_batch_loss = {micro_batch_loss}")
+        logger.debug(f"micro_batch_loss = {micro_batch_loss}")
         global_batch_loss += micro_batch_loss.detach()*batch_size
 
         # We devide micro_batch_loss by accumulation_steps to get scaled loss because the gradients will keep accumulating for accumulation_steps up to number of micro batches times before we do an optimizer step
@@ -250,9 +276,26 @@ if __name__ == '__main__':
         # handle gradient accumulation
         if total_accumulated % global_batch_size == 0:
             global_batch_loss = global_batch_loss / global_batch_size
-            print(f"global_batch_loss = {global_batch_loss}")
+            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss}")
             optimizer.step()
             lr_scheduler.step()
+
+            global_step += 1
+            if global_step % exp_config.get("training").get("checkpoint_interval") == 0:
+                checkpoint_path = os.path.join(log_dir, f"checkpoints/checkpoint_{global_step}.pt")
+                logger.info(f"Saving checkpoint to {checkpoint_path}")
+                checkpoint = {
+                    'model_state_dict': model.state_dict(),
+                    'optimizer_state_dict': optimizer.state_dict(),
+                    'scheduler_state_dict': lr_scheduler.state_dict(),
+                    'global_step': global_step,
+                    'batch_idx': batch_idx, # Index in the current epoch/dataloader
+                    'torch_rng_state': torch.get_rng_state(),
+                    'numpy_rng_state': np.random.get_state(),
+                }
+                if torch.cuda.is_available():
+                    checkpoint['cuda_rng_state'] = torch.cuda.get_rng_state_all()
+                torch.save(checkpoint, checkpoint_path)
 
             optimizer.zero_grad()
             total_accumulated = 0

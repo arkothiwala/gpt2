@@ -36,6 +36,7 @@ training:
   test_epoch_interval: 5
   init_std: 0.02
   dataloader_num_workers: 8
+  checkpoint_interval: 10
 
 # all configs for dataset and dataloader
 data:
