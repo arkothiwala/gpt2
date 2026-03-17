@@ -11,3 +11,5 @@
 - weight initialization of N(0,0.02) to be updated
 - add modified version L2 regularization w=0.01 on all non-bias or gain weights
 - [done] update gradients because in gloabal loss calculation -> we are summing up
+- add perplexity
+- try with just is_causal=True instead of providing actual attention mask -> pytorch natively uses flash attention in that case
