@@ -61,3 +61,4 @@ Trainings:
     - `zsh: bus error  python train.py --model_yaml`
 - using exp_config.get() can lead to breaking the code silently as bunch of parameters are passed as null and torch will have a default handling for it. use d[key] for such scenarios
 - The issue is well known that cross entropy loss with logits and labels is unstable for classes > 50000 with MPS. So, I moved the logits to CPU for loss calculation and it worked [per row it is 100 MB data -> with batchsize of 8 -> it's 800MB data that needs to be transferred for each batch]
+- gradient accumulation - due to which gradients are multipliers [n_accumulator_steps] of the desired gradients. We have to account for it and calculate gradients on a scaled micro batch loss

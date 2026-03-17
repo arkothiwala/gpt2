@@ -42,7 +42,7 @@ if __name__ == '__main__':
     # Setting common variables
     device = torch.device("cuda") if torch.cuda.is_available() else (torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu"))
     # device = 'cpu'
-    cross_entropy_loss = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction='sum')
+    cross_entropy_loss = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
     global_batch_size = exp_config.get("training").get("global_batch_size")
     ################################################
 
@@ -67,23 +67,7 @@ if __name__ == '__main__':
     print(f"Model parameters device: {next(model.parameters()).device}")
     print(f"embedding parameters device: {next(model.get_submodule('embedding').parameters()).device}")
 
-
-    ########################################################################
-    ############################# Optim Config #############################
-    ########################################################################
-
-
-    if exp_config.get("optimizer").get("type") == "adam":
-        optimizer = torch.optim.Adam(
-            params=model.parameters(),
-            lr = exp_config.get("optimizer").get("lr"),
-            weight_decay = exp_config.get("optimizer").get("weight_decay"),
-            betas=(
-                exp_config.get("optimizer").get("beta1"),
-                exp_config.get("optimizer").get("beta2")
-            ),
-        )
-        
+    
     ########################################################################
     ##################### Dataset and Dataloader setup #####################
     ########################################################################
@@ -179,67 +163,116 @@ if __name__ == '__main__':
 
     print(model(x=torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)).shape)
 
+    ########################################################################
+    #################### Optim + LR Scheduler Config #######################
+    ########################################################################
+
+
+    if exp_config.get("optimizer").get("type") == "adam":
+        optimizer = torch.optim.Adam(
+            params=model.parameters(),
+            lr = exp_config.get("optimizer").get("lr"),
+            weight_decay = exp_config.get("optimizer").get("weight_decay"),
+            betas=(
+                exp_config.get("optimizer").get("beta1"),
+                exp_config.get("optimizer").get("beta2")
+            ),
+        )
+
+    total_optimizer_steps = len(train_ds) // exp_config.get("training").get("global_batch_size")
+    cosine_ann_steps = total_optimizer_steps - exp_config.get("scheduler").get("warmup_steps")
+    lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
+        optimizer=optimizer,
+        schedulers=[
+            torch.optim.lr_scheduler.LinearLR(
+                optimizer=optimizer, 
+                start_factor=exp_config.get("scheduler").get("warmup_start_factor"), 
+                end_factor=exp_config.get("scheduler").get("warmup_end_factor"), 
+                total_iters=exp_config.get("scheduler").get("warmup_steps")
+            ),
+            torch.optim.lr_scheduler.CosineAnnealingLR(
+                optimizer=optimizer, 
+                T_max=cosine_ann_steps
+            )
+        ],
+        milestones=[exp_config.get("scheduler").get("warmup_steps")],
+        verbose=True
+    )
+
     #########################################################################
     ############################# training loop #############################
     #########################################################################
 
-    for epoch in tqdm(range(exp_config.get("training").get("epochs")), desc="epoch progress"):
-        # set model in the training model
-        model.train()
-        
-        # zero_grad
-        total_accumulated = 0
-        global_batch_loss = torch.tensor(0.0, requires_grad=False)
-        optimizer.zero_grad()
-        
-        # iterate through the micro_batch_size
-        for batch_x_train, batch_y_train in tqdm(train_dl, desc="epoch's batch progress"):
-            batch_size = batch_x_train.shape[0]
-            total_accumulated += batch_size
+    # LEARNINGS: Unlike GPT1 where they trained the model for 100 epochs, modern LLMs are mostly trained for 1 epochs to avoid overfitting.
 
-            # print(f"pushing batch_x_train to {device}")
+    # for epoch in tqdm(range(exp_config.get("training").get("epochs")), desc="epoch progress"):
+    # set model in the training model
+    model.train()
+    
+    # zero_grad
+    total_accumulated = 0
+    global_batch_loss = 0 #torch.tensor(0.0, requires_grad=False)
+    optimizer.zero_grad()
+    
+    # iterate through the micro_batch_size
+    for batch_x_train, batch_y_train in tqdm(train_dl, desc="epoch's batch progress"):
+        batch_size = batch_x_train.shape[0]
+        total_accumulated += batch_size
 
-            # MISTAKE - I wasn't assigning it back to the variable leading to `RuntimeError: Placeholder storage has not been allocated on MPS device!`
-            batch_x_train = batch_x_train.to(device=device)
-            # batch_y_train = batch_y_train.to(device=device)
+        # print(f"pushing batch_x_train to {device}")
 
-            # print(f"batch_x_train.max() = {batch_x_train.max().max()}")
+        # MISTAKE - I wasn't assigning it back to the variable leading to `RuntimeError: Placeholder storage has not been allocated on MPS device!`
+        batch_x_train = batch_x_train.to(device=device)
+        # batch_y_train = batch_y_train.to(device=device)
 
-            # forward pass
-            batch_logits = model(batch_x_train)
-            # print(f"batch_logits.shape = {batch_logits.shape}")
-            # print(f"batch_y_train.shape = {batch_y_train.shape}")
-            # print(f"batch_y_train.max() = {batch_y_train.max().max()} | batch_y_train.min() = {batch_y_train.min()}")
-            # micro_batch_loss = cross_entropy_loss(input=batch_logits.permute(0,2,1).contiguous(), target=batch_y_train)
-            batch_logits = batch_logits.to(device='cpu')
-            # batch_y_train = batch_y_train.to(device='cpu')
-            assert batch_logits.device == batch_y_train.device, f"batch_logits device {batch_logits.device} and batch_y_train device {batch_y_train.device} are not the same"
-            micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
-            # print(f"micro_batch_loss.shape = {micro_batch_loss.shape}")
-            print(f"micro_batch_loss = {micro_batch_loss}")
-            global_batch_loss += micro_batch_loss
-            micro_batch_loss.backward()
+        # print(f"batch_x_train.max() = {batch_x_train.max().max()}")
 
-            # handle gradient accumulation
-            if total_accumulated % global_batch_size == 0:
-                print(f"global_batch_loss = {global_batch_loss}")
-                optimizer.step()
-                optimizer.zero_grad()
-                total_accumulated = 0
-                global_batch_loss = torch.tensor(0.0, requires_grad=False)
+        # forward pass
+        batch_logits = model(batch_x_train)
+        # print(f"batch_logits.shape = {batch_logits.shape}")
+        # print(f"batch_y_train.shape = {batch_y_train.shape}")
+        # print(f"batch_y_train.max() = {batch_y_train.max().max()} | batch_y_train.min() = {batch_y_train.min()}")
+        # micro_batch_loss = cross_entropy_loss(input=batch_logits.permute(0,2,1).contiguous(), target=batch_y_train)
+        batch_logits = batch_logits.to(device='cpu')
+        # batch_y_train = batch_y_train.to(device='cpu')
+        assert batch_logits.device == batch_y_train.device, f"batch_logits device {batch_logits.device} and batch_y_train device {batch_y_train.device} are not the same"
+        micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
+        # print(f"micro_batch_loss.shape = {micro_batch_loss.shape}")
+        print(f"micro_batch_loss = {micro_batch_loss}")
+        global_batch_loss += micro_batch_loss.detach()*batch_size
 
-        
-        # update weights as of the last batch of the epoch
+        # We devide micro_batch_loss by accumulation_steps to get scaled loss because the gradients will keep accumulating for accumulation_steps up to number of micro batches times before we do an optimizer step
+        # this is equivalent to doing global batch size gradient accumulation in small chunks
+        accumulation_steps = global_batch_size // batch_size
+        micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
+        micro_batch_loss_scaled.backward()
+
+        # handle gradient accumulation
+        if total_accumulated % global_batch_size == 0:
+            global_batch_loss = global_batch_loss / global_batch_size
+            print(f"global_batch_loss = {global_batch_loss}")
+            optimizer.step()
+            lr_scheduler.step()
+
+            optimizer.zero_grad()
+            total_accumulated = 0
+            global_batch_loss = 0
+
+    
+    # update weights as of the last batch of the epoch
+    if total_accumulated > 0:
         optimizer.step()
+        lr_scheduler.step()
+
         optimizer.zero_grad()
         total_accumulated = 0
-        global_batch_loss = torch.tensor(0.0, requires_grad=False)
+        global_batch_loss = 0
 
-        # # run validation after n_epoch interval
-        # if epoch % exp_config.get("training").get("valid_epoch_interval") == 0:
-        #     model.eval()
-        #     # run batch predictions
+    # # run validation after n_epoch interval
+    # if epoch % exp_config.get("training").get("valid_epoch_interval") == 0:
+    #     model.eval()
+    #     # run batch predictions
 
-            
-        # # do forward pass, backward pass, accumulate gradient and update weights when global_batch_size is met
+        
+    # # do forward pass, backward pass, accumulate gradient and update weights when global_batch_size is met
 
