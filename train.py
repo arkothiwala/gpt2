@@ -11,6 +11,7 @@ from tqdm import tqdm
 import os
 from datetime import datetime
 import logging
+import math
 torch.set_float32_matmul_precision('high')
 
 # Remove basicConfig to avoid conflict with custom handlers
@@ -279,7 +280,11 @@ if __name__ == '__main__':
         # handle gradient accumulation
         if total_accumulated % global_batch_size == 0:
             global_batch_loss = global_batch_loss / global_batch_size
-            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss}")
+            try:
+                perplexity = math.exp(global_batch_loss.item())
+            except OverflowError:
+                perplexity = float('inf')
+            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']}")
             optimizer.step()
             lr_scheduler.step()
 
