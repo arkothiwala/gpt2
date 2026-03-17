@@ -11,6 +11,7 @@ from tqdm import tqdm
 import os
 from datetime import datetime
 import logging
+torch.set_float32_matmul_precision('high')
 
 # Remove basicConfig to avoid conflict with custom handlers
 # logging.basicConfig(level=logging.DEBUG)
@@ -154,7 +155,7 @@ if __name__ == '__main__':
         multiprocessing_context = None,
         generator = None,
         prefetch_factor = exp_config.get("data").get("prefetch_factor"),
-        persistent_workers = True,
+        persistent_workers = False,
         pin_memory_device = "cuda" if torch.cuda.is_available() else ''
     )
 
@@ -173,7 +174,7 @@ if __name__ == '__main__':
         multiprocessing_context = None,
         generator = None,
         prefetch_factor = exp_config.get("data").get("prefetch_factor"),
-        persistent_workers = True,
+        persistent_workers = False,
         pin_memory_device = "cuda" if torch.cuda.is_available() else ''
     )
 
@@ -187,7 +188,8 @@ if __name__ == '__main__':
     batch[0] = batch[0].to(device)
     batch[1] = batch[1].to(device)
 
-    logger.debug(model(x=torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)).shape)
+    with torch.no_grad():
+        logger.debug(model(x=torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)).shape)
 
     ########################################################################
     #################### Optim + LR Scheduler Config #######################
@@ -233,6 +235,7 @@ if __name__ == '__main__':
     # for epoch in tqdm(range(exp_config.get("training").get("epochs")), desc="epoch progress"):
     # set model in the training model
     model.train()
+    model.compile()
     
     # zero_grad
     total_accumulated = 0

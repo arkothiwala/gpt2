@@ -79,8 +79,9 @@ class TransformerBlock(torch.nn.Module):
             value=x_layer_norm_mha, 
             # attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1, device=x.device).bool(), # not using is_causal=True because because using it along with need_weights=True is leading to silent or loud failures based on the pytorch version. Also, instead of float mask we are preparing boolean mask as it would consume much less memory, makes compute slightly faster and is recommended by PyTorch.
             attn_mask=self.causal_mask[:seq_len, :seq_len], # using pre-registered buffer for causal mask. This would be more efficient as we are not creating the mask in every forward pass and also it would be on the same device as the model.
-            need_weights=True,
-            key_padding_mask=None # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
+            need_weights=False,
+            key_padding_mask=None, # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
+            is_causal=True # using built-in causal mask support in PyTorch which is more efficient and also works well with need_weights=True. This would automatically apply the causal mask to the attention scores before softmax.
         )
         x_post_mha = x + x_post_mha
         
