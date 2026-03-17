@@ -1,4 +1,3 @@
-from async_timeout import timeout
 import tiktoken
 import torch
 import yaml
@@ -36,7 +35,9 @@ if __name__ == '__main__':
     # Logging config
     now = datetime.now()
     log_dir = os.path.join("training_runs", now.strftime("%Y%m%d_%H%M%S"))
+    checkpoint_dir = os.path.join(log_dir, "checkpoints")
     os.makedirs(log_dir, exist_ok=True)
+    os.makedirs(checkpoint_dir, exist_ok=True)
     log_file_path = os.path.join(log_dir, "model.log")
 
     logger = logging.getLogger(__name__)
@@ -221,7 +222,6 @@ if __name__ == '__main__':
             )
         ],
         milestones=[exp_config.get("scheduler").get("warmup_steps")],
-        verbose=True
     )
 
     #########################################################################
@@ -249,7 +249,7 @@ if __name__ == '__main__':
 
         # MISTAKE - I wasn't assigning it back to the variable leading to `RuntimeError: Placeholder storage has not been allocated on MPS device!`
         batch_x_train = batch_x_train.to(device=device)
-        # batch_y_train = batch_y_train.to(device=device)
+        batch_y_train = batch_y_train.to(device=device) if torch.cuda.is_available() else batch_y_train
 
         # print(f"batch_x_train.max() = {batch_x_train.max().max()}")
 
@@ -259,7 +259,7 @@ if __name__ == '__main__':
         # print(f"batch_y_train.shape = {batch_y_train.shape}")
         # print(f"batch_y_train.max() = {batch_y_train.max().max()} | batch_y_train.min() = {batch_y_train.min()}")
         # micro_batch_loss = cross_entropy_loss(input=batch_logits.permute(0,2,1).contiguous(), target=batch_y_train)
-        batch_logits = batch_logits.to(device='cpu')
+        batch_logits = batch_logits.to(device='cpu') if not torch.cuda.is_available() else batch_logits
         # batch_y_train = batch_y_train.to(device='cpu')
         assert batch_logits.device == batch_y_train.device, f"batch_logits device {batch_logits.device} and batch_y_train device {batch_y_train.device} are not the same"
         micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
@@ -282,7 +282,7 @@ if __name__ == '__main__':
 
             global_step += 1
             if global_step % exp_config.get("training").get("checkpoint_interval") == 0:
-                checkpoint_path = os.path.join(log_dir, f"checkpoints/checkpoint_{global_step}.pt")
+                checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_{global_step}.pt")
                 logger.info(f"Saving checkpoint to {checkpoint_path}")
                 checkpoint = {
                     'model_state_dict': model.state_dict(),

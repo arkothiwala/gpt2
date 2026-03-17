@@ -30,7 +30,7 @@ scheduler:
 # all configs for training loop
 training:
   global_batch_size: 512
-  micro_batch_size: 2
+  micro_batch_size: 4
   epochs: 100
   valid_epoch_interval: 5
   test_epoch_interval: 5

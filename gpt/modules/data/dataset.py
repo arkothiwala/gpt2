@@ -5,7 +5,7 @@ import pandas as pd
 import numpy as np
 import os
 import itertools
-from more_itertools import batched
+from itertools import batched
 
 class GPTDataUtils:
 
