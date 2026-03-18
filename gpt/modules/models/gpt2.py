@@ -19,6 +19,7 @@ class GPT2Model(torch.nn.Module):
             max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
+        torch.nn.init.normal_(self.embedding.weight, mean=0.0, std=0.02)
         # self.position_embedding = SinusoidalPositionalEmbeddings(n_dim=self.d_model)
         # add sequential layers
         for layer in range(self.n_layers):
@@ -42,6 +43,7 @@ class GPT2Model(torch.nn.Module):
             max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
+        torch.nn.init.normal_(self.learnt_position_embedding.weight, mean=0.0, std=0.02)
         self.dropout = torch.nn.Dropout(p=0.1)
 
 

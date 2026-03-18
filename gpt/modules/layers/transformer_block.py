@@ -24,6 +24,9 @@ class TransformerBlock(torch.nn.Module):
             ("dropout", torch.nn.Dropout(p=0.1)),
             ("linear_projection", torch.nn.Linear(in_features=4*d_model, out_features=d_model, bias=True))
         ]))
+        
+        self.dropout_residual_mha = torch.nn.Dropout(p=0.1)
+        self.dropout_residual_ffn = torch.nn.Dropout(p=0.1)
 
         # scale MHA parameters by scaling factor
         # This was introduced in GPT2 paper to stabilize deep layers
@@ -58,6 +61,22 @@ class TransformerBlock(torch.nn.Module):
 
             self.MHA.out_proj.weight.mul_(scaling_factor)
             self.FFN.linear_projection.weight.mul_(scaling_factor)
+            
+            # Added normal initialization for weights and zero initialization for biases as mentioned in GPT2 paper.
+            torch.nn.init.normal_(self.FFN.linear_expansion.weight, mean=0.0, std=0.02)
+            torch.nn.init.zeros_(self.FFN.linear_expansion.bias)
+            if self.MHA.in_proj_weight is not None:
+                torch.nn.init.normal_(self.MHA.in_proj_weight, mean=0.0, std=0.02)
+                torch.nn.init.zeros_(self.MHA.in_proj_bias)
+            if self.MHA.q_proj_weight is not None:
+                torch.nn.init.normal_(self.MHA.q_proj_weight, mean=0.0, std=0.02)
+                torch.nn.init.zeros_(self.MHA.q_proj_bias)
+            if self.MHA.k_proj_weight is not None:
+                torch.nn.init.normal_(self.MHA.k_proj_weight, mean=0.0, std=0.02)
+                torch.nn.init.zeros_(self.MHA.k_proj_bias)
+            if self.MHA.v_proj_weight is not None:
+                torch.nn.init.normal_(self.MHA.v_proj_weight, mean=0.0, std=0.02)
+                torch.nn.init.zeros_(self.MHA.v_proj_bias)
         
         self.layer_norm_mha = CustomLayerNorm(d_model=self.d_model)
         self.layer_norm_ffn = CustomLayerNorm(d_model=self.d_model)
@@ -83,10 +102,10 @@ class TransformerBlock(torch.nn.Module):
             key_padding_mask=None, # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
             is_causal=True # using built-in causal mask support in PyTorch which is more efficient and also works well with need_weights=True. This would automatically apply the causal mask to the attention scores before softmax.
         )
-        x_post_mha = x + x_post_mha
+        x_post_mha = x + self.dropout_residual_mha(x_post_mha)
         
 
         x_layer_norm_ffn = self.layer_norm_ffn(x_post_mha)
-        x_post_ffn = x_post_mha + self.FFN(x_layer_norm_ffn)
+        x_post_ffn = x_post_mha + self.dropout_residual_ffn(self.FFN(x_layer_norm_ffn))
         return x_post_ffn
         
