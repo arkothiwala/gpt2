@@ -284,7 +284,8 @@ if __name__ == '__main__':
                 perplexity = math.exp(global_batch_loss.item())
             except OverflowError:
                 perplexity = float('inf')
-            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']}")
+            unclipped_grad_norm = torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=exp_config.get("training").get("max_grad_norm"), error_if_nonfinite=False)
+            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} | unclipped_grad_norm = {unclipped_grad_norm}")
             optimizer.step()
             lr_scheduler.step()
 
