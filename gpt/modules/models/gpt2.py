@@ -53,6 +53,10 @@ class GPT2Model(torch.nn.Module):
         x_learnt_embeddings = self.embedding(x)
         # x_pos_embeddings = self.position_embedding(self.context_length)
         x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len).to(x.device))
+        print("x_pos_embeddings.shape = ", x_pos_embeddings.shape)
+        x_pos_embeddings = x_pos_embeddings.unsqueeze(0).expand(batch_size, -1, -1)
+        print("x_pos_embeddings.shape = ", x_pos_embeddings.shape)
+        
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
         # x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1) # MISTAKE - I had initially used functional dropout here w/o train v/s inference mode check. Moving it to Dropout module which internally manages train v/s inference mode and also makes code cleaner.
         x_embeddings = self.dropout(x_embeddings)
