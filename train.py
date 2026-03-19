@@ -236,7 +236,7 @@ if __name__ == '__main__':
     # for epoch in tqdm(range(exp_config.get("training").get("epochs")), desc="epoch progress"):
     # set model in the training model
     model.train()
-    model.compile()
+    model.compile() if torch.cuda.is_available() else model
     
     # zero_grad
     total_accumulated = 0
