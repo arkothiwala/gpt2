@@ -16,7 +16,7 @@ tokenizer:
 
 optimizer:
   type: adam
-  lr: 2.5e-4
+  lr: 0.0005
   weight_decay: 0.01
   beta1: 0.9
   beta2: 0.999
@@ -37,6 +37,7 @@ training:
   init_std: 0.02
   dataloader_num_workers: 8
   checkpoint_interval: 10
+  max_grad_norm: 3
 
 # all configs for dataset and dataloader
 data:
