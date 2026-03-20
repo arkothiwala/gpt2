@@ -1,9 +1,11 @@
 import torch
 import numpy as np
 from gpt.modules.layers.transformer_block import CustomLayerNorm, TransformerBlock
+import logging
+logger = logging.getLogger(__name__)
 
 class GPT2Model(torch.nn.Module):
-    def __init__(self, d_model, n_heads, n_layers, vocab_size, context_length, *args, **kwargs):
+    def __init__(self, d_model, n_heads, n_layers, vocab_size, context_length, logger=logger, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.d_model = d_model
         self.n_heads = n_heads
@@ -12,6 +14,7 @@ class GPT2Model(torch.nn.Module):
         self.context_length = context_length
         self.transformer_layers = torch.nn.Sequential()
         self.final_layer_norm = CustomLayerNorm(d_model=self.d_model)
+        self.logger = logger
         self.embedding = torch.nn.Embedding(
             num_embeddings=self.vocab_size,
             embedding_dim=self.d_model,
@@ -45,26 +48,25 @@ class GPT2Model(torch.nn.Module):
         self.dropout = torch.nn.Dropout(p=0.1)
         self.initialize_model_parameters(scaling_factor=1/np.sqrt(2*self.n_layers))
         self.print_weight_std(self.transformer_layers)
-        
 
     def print_weight_std(self, model):
-        print(f"{'Layer Name':<60} | {'Std Dev':<10}")
-        print("-" * 75)
+        self.logger.info(f"{'Layer Name':<60} | {'Std Dev':<10}")
+        self.logger.info("-" * 75)
         
         for name, param in model.named_parameters():
             # We only care about weights, not biases
             if 'weight' in name:
                 std = param.std().item()
-                print(f"{name:<60} | {std:.6f}")
+                self.logger.info(f"{name:<60} | {std:.6f}")
         
     def initialize_model_parameters(self, scaling_factor):
-        print(f"scaling_factor = {scaling_factor}")
+        self.logger.info(f"scaling_factor = {scaling_factor}")
         with torch.no_grad():
             # initialize all linear weights with normal distribution and biases with zeros
             for module in self.modules():
-                print(f"Initializing module: {module.__class__.__name__}")
+                self.logger.info(f"Initializing module: {module.__class__.__name__}")
                 if isinstance(module, torch.nn.Linear):
-                    print(f"setting {module._get_name()} weight with normal distribution and bias with zeros")
+                    self.logger.info(f"setting {module._get_name()} weight with normal distribution and bias with zeros")
                     torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
                     if module.bias is not None:
                         torch.nn.init.zeros_(module.bias)
@@ -72,25 +74,25 @@ class GPT2Model(torch.nn.Module):
                     torch.nn.init.normal_(module.weight, mean=0.0, std=0.02)
                     
                 if isinstance(module, CustomLayerNorm):
-                    print("Initializing CustomLayerNorm weight with ones and bias with zeros")
+                    self.logger.info("Initializing CustomLayerNorm weight with ones and bias with zeros")
                     # print weights and bias norms for confirmation
-                    # print(f"Before initialization - LayerNorm weight norm: {module.weight.norm().item()}, bias norm: {module.bias.norm().item()}")
+                    # self.logger.info(f"Before initialization - LayerNorm weight norm: {module.weight.norm().item()}, bias norm: {module.bias.norm().item()}")
                     torch.nn.init.ones_(module.weight)
                     torch.nn.init.zeros_(module.bias)
-                    # print(f"After initialization - LayerNorm weight norm: {module.weight.norm().item()}, bias norm: {module.bias.norm().item()}")
+                    # self.logger.info(f"After initialization - LayerNorm weight norm: {module.weight.norm().item()}, bias norm: {module.bias.norm().item()}")
                     
                 if isinstance(module, TransformerBlock):
                     # scale only residual connection weights correctly
                     torch.nn.init.normal_(module.MHA.in_proj_weight, mean=0.0, std=0.02)
                     torch.nn.init.normal_(module.MHA.out_proj.weight, mean=0.0, std=0.02)
-                    print("Initializing TransformerBlock MHA in_proj_weight with normal distribution")
+                    self.logger.info("Initializing TransformerBlock MHA in_proj_weight with normal distribution")
                     
                     module.MHA.out_proj.weight.mul_(scaling_factor)
                     module.FFN.linear_projection.weight.mul_(scaling_factor)
 
 
     def forward(self, x, return_proba = False):
-        # print(f"x.shape = {x.shape}")
+        # self.logger.info(f"x.shape = {x.shape}")
         batch_size, seq_len = x.shape
         assert seq_len <= self.context_length, "Sequence length exceeds model context_length"
         x_learnt_embeddings = self.embedding(x)
