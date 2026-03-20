@@ -118,6 +118,7 @@ if __name__ == '__main__':
             n_layers=exp_config.get("model").get("n_layers"),
             vocab_size=exp_config.get("model").get("vocab_size"),
             context_length=exp_config.get("model").get("context_length"),
+            logger=logger
         )
     model.to(device)
     logger.info("loaded total {} parameters".format(sum(p.numel() for p in model.parameters())))
@@ -291,6 +292,7 @@ if __name__ == '__main__':
     # zero_grad
     total_accumulated = 0
     global_batch_loss = 0 #torch.tensor(0.0, requires_grad=False)
+    global_logits_variance = 0
     optimizer.zero_grad()
     
     # iterate through the micro_batch_size
@@ -322,6 +324,7 @@ if __name__ == '__main__':
         # print(f"micro_batch_loss.shape = {micro_batch_loss.shape}")
         logger.debug(f"micro_batch_loss = {micro_batch_loss}")
         global_batch_loss += micro_batch_loss.detach()*batch_size
+        global_logits_variance += batch_logits.var(dim=-1).mean().item() * batch_size
 
         # We devide micro_batch_loss by accumulation_steps to get scaled loss because the gradients will keep accumulating for accumulation_steps up to number of micro batches times before we do an optimizer step
         # this is equivalent to doing global batch size gradient accumulation in small chunks
@@ -332,6 +335,7 @@ if __name__ == '__main__':
         # handle gradient accumulation
         if total_accumulated % global_batch_size == 0:
             global_batch_loss = global_batch_loss / global_batch_size
+            global_logits_variance = global_logits_variance / global_batch_size
             try:
                 perplexity = math.exp(global_batch_loss.item())
             except OverflowError:
@@ -348,6 +352,7 @@ if __name__ == '__main__':
                 "train/learning_rate": optimizer.param_groups[0]['lr'],
                 "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
                 "train/step": global_step,
+                "train/logits_variance": global_logits_variance,
             })
             
             optimizer.step()
@@ -374,6 +379,7 @@ if __name__ == '__main__':
             optimizer.zero_grad()
             total_accumulated = 0
             global_batch_loss = 0
+            global_logits_variance = 0
 
     
     # update weights as of the last batch of the epoch
