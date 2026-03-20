@@ -80,7 +80,7 @@ if __name__ == '__main__':
     ################################################
     # Setting common variables
     device = torch.device("cuda") if torch.cuda.is_available() else (torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu"))
-    device = 'cpu'
+    # device = 'cpu'
     cross_entropy_loss = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
     global_batch_size = exp_config.get("training").get("global_batch_size")
     ################################################
