@@ -13,6 +13,7 @@ import os
 from datetime import datetime
 import logging
 import math
+import random
 torch.set_float32_matmul_precision('high')
 
 # Remove basicConfig to avoid conflict with custom handlers
@@ -33,6 +34,7 @@ def validate_experiment_config(config):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_yaml", help="configs/<exp_config>.yaml file path")
+    parser.add_argument("--checkpoint_path", default=None, help="checkpoint path to resume training from")
     args = parser.parse_args()
 
     # Logging config
@@ -67,6 +69,23 @@ if __name__ == '__main__':
     with open(args.model_yaml, "r") as f:
         exp_config = yaml.safe_load(f)
         logger.debug(f"Config: {exp_config}")
+    
+    #########################################################################
+    ############################ load checkpoint ############################
+    #########################################################################
+
+    if args.checkpoint_path is not None:
+        logger.info(f"Resuming training from checkpoint: {args.checkpoint_path}")
+        checkpoint = torch.load(args.checkpoint_path, weights_only=False)
+        exp_config['training']['global_batch_size'] = checkpoint.get('global_batch_size', exp_config['training']['global_batch_size'])
+        exp_config['training']['micro_batch_size'] = checkpoint.get('micro_batch_size', exp_config['training']['micro_batch_size'])
+        exp_config['checkpoint'] = {
+            'path': args.checkpoint_path,
+            'global_step': checkpoint.get('global_step', 0),
+            'batch_idx': checkpoint.get('batch_idx', 0),
+            'scheduler_state_dict': checkpoint.get('scheduler_state_dict', None),
+        }
+        logger.debug(f"Updated Config after loading checkpoint: {exp_config}")
 
     ################################################
     # Wandb Init
@@ -238,6 +257,26 @@ if __name__ == '__main__':
         milestones=[exp_config.get("scheduler").get("warmup_steps")],
     )
 
+    if args.checkpoint_path is not None:
+        if checkpoint.get('scheduler_state_dict', None) is not None:
+            lr_scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+            model.load_state_dict(checkpoint['model_state_dict'])
+            optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+
+            # set RNG states
+            torch.set_rng_state(checkpoint['torch_rng_state'])
+            if torch.cuda.is_available() and 'cuda_rng_state' in checkpoint and checkpoint['cuda_rng_state'] is not None:
+                torch.cuda.set_rng_state_all(checkpoint['cuda_rng_state'])
+            if 'numpy_rng_state' in checkpoint and checkpoint['numpy_rng_state'] is not None:
+                np.random.set_state(checkpoint['numpy_rng_state'])
+            if 'python_rng_state' in checkpoint and checkpoint['python_rng_state'] is not None:
+                random.setstate(checkpoint['python_rng_state'])
+            
+            logger.info(f"Loaded LR scheduler state from checkpoint: {args.checkpoint_path}")
+            logger.info(f"Resuming training from global step: {checkpoint.get('global_step', 'N/A')} and batch index: {checkpoint.get('batch_idx', 'N/A')}")
+        else:
+            logger.warning(f"No LR scheduler state found in checkpoint: {args.checkpoint_path}. Starting LR scheduler from scratch.")
+
     #########################################################################
     ############################# training loop #############################
     #########################################################################
@@ -255,8 +294,10 @@ if __name__ == '__main__':
     optimizer.zero_grad()
     
     # iterate through the micro_batch_size
-    global_step = 0
-    for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_dl, desc="epoch's batch progress")):
+    global_step = 0 if args.checkpoint_path is None else checkpoint["global_step"]
+    batch_idx_start = 0 if args.checkpoint_path is None else checkpoint["batch_idx"]
+    logger.info(f"Starting training loop from global step {global_step}, batch index {batch_idx_start}, lr {optimizer.param_groups[0]['lr']}, global batch size {global_batch_size}, micro batch size {exp_config.get('training').get('micro_batch_size')}")
+    for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_dl, desc="epoch's batch progress"), start=batch_idx_start):
         batch_size = batch_x_train.shape[0]
         total_accumulated += batch_size
 
@@ -324,6 +365,7 @@ if __name__ == '__main__':
                     'batch_idx': batch_idx, # Index in the current epoch/dataloader
                     'torch_rng_state': torch.get_rng_state(),
                     'numpy_rng_state': np.random.get_state(),
+                    'python_rng_state': random.getstate(),
                 }
                 if torch.cuda.is_available():
                     checkpoint['cuda_rng_state'] = torch.cuda.get_rng_state_all()
