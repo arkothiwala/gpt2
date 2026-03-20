@@ -3,6 +3,7 @@ import torch
 import yaml
 import argparse
 import numpy as np
+import wandb
 from gpt.modules.models.gpt2 import GPT2Model
 from gpt.modules.data.dataset import GPTDatasetBinFile
 from gpt.modules.data.utils import DataUtils
@@ -36,7 +37,8 @@ if __name__ == '__main__':
 
     # Logging config
     now = datetime.now()
-    log_dir = os.path.join("training_runs", now.strftime("%Y%m%d_%H%M%S"))
+    exp_run_time = now.strftime("%Y%m%d_%H%M%S")
+    log_dir = os.path.join("training_runs", exp_run_time)
     checkpoint_dir = os.path.join(log_dir, "checkpoints")
     os.makedirs(log_dir, exist_ok=True)
     os.makedirs(checkpoint_dir, exist_ok=True)
@@ -67,9 +69,18 @@ if __name__ == '__main__':
         logger.debug(f"Config: {exp_config}")
 
     ################################################
+    # Wandb Init
+    ################################################
+    wandb.init(
+        project="gpt2-from-scratch",
+        config=exp_config,
+        name=f"{exp_run_time}",
+    )
+
+    ################################################
     # Setting common variables
     device = torch.device("cuda") if torch.cuda.is_available() else (torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu"))
-    # device = 'cpu'
+    device = 'cpu'
     cross_entropy_loss = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
     global_batch_size = exp_config.get("training").get("global_batch_size")
     ################################################
@@ -289,6 +300,15 @@ if __name__ == '__main__':
             clipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
             logger.info(f"unclipped_grad_norm_early = {unclipped_grad_norm_early} | unclipped_grad_norm = {unclipped_grad_norm} | clipped_grad_norm = {clipped_grad_norm}")
             logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} | unclipped_grad_norm = {unclipped_grad_norm} | clipped_grad_norm = {clipped_grad_norm}")
+            
+            wandb.log({
+                "train/loss": global_batch_loss.item() if isinstance(global_batch_loss, torch.Tensor) else global_batch_loss,
+                "train/perplexity": perplexity,
+                "train/learning_rate": optimizer.param_groups[0]['lr'],
+                "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
+                "train/step": global_step,
+            })
+            
             optimizer.step()
             lr_scheduler.step()
 
@@ -322,6 +342,8 @@ if __name__ == '__main__':
         optimizer.zero_grad()
         total_accumulated = 0
         global_batch_loss = 0
+    
+    wandb.finish()
 
     # # run validation after n_epoch interval
     # if epoch % exp_config.get("training").get("valid_epoch_interval") == 0:
