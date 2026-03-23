@@ -98,6 +98,9 @@ class GPT2Model(torch.nn.Module):
                     torch.nn.init.ones_(module.weight)
                     torch.nn.init.zeros_(module.bias)
                     # self.logger.info(f"After initialization - LayerNorm weight norm: {module.weight.norm().item()}, bias norm: {module.bias.norm().item()}")
+            
+            # MISTAKE - weights were getting overwritten to 0.02 with linear layers as there was no dedicated loop for transformer blocks.
+            for module in self.modules():        
                 if isinstance(module, TransformerBlock):
                     # scale only residual connection weights correctly
                     torch.nn.init.normal_(module.MHA.in_proj_weight, mean=0.0, std=0.02)
