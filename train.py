@@ -34,6 +34,21 @@ def validate_experiment_config(config):
 
     return True
 
+def get_modulewise_grad_norms(model, norm_type=2, prefix="norm/"):
+    d = {}
+    def process_name(name):
+        return name.replace("transformer_layers.", "L").replace("linear_expansion","exp").replace("linear_projection", "proj").replace("layer_norm", "ln").replace("layer_norm", "ln")
+    for name, module in model.named_modules():
+        total_norm = 0.0
+        for param in module.parameters(recurse=False):
+            if param.grad is not None:
+                total_norm += param.grad.norm(norm_type).item() ** norm_type
+
+        if total_norm > 0:
+            total_norm = total_norm ** (1.0 / norm_type)
+            d[prefix + process_name(name)] = total_norm
+    return d
+
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_yaml", help="configs/<exp_config>.yaml file path")
@@ -427,6 +442,7 @@ if __name__ == '__main__':
                 "train/logits_max": global_logits_max,
                 "train/logits_min": global_logits_min,
                 "train/logits_mean": global_logits_mean,
+                **get_modulewise_grad_norms(model)
             })
             
             if autocast_dtype == torch.float16:
