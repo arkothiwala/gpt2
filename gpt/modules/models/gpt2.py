@@ -24,7 +24,7 @@ class GPT2Model(torch.nn.Module):
             max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
-        self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
+        # self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
         # add sequential layers
         for layer in range(self.n_layers):
             self.transformer_layers.append(
@@ -41,13 +41,13 @@ class GPT2Model(torch.nn.Module):
         self.transformer_layers.append(self.final_layer_norm)
         # predict token with softmax
         # self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
-        # self.learnt_position_embedding = torch.nn.Embedding(
-        #     num_embeddings=self.context_length,
-        #     embedding_dim=self.d_model,
-        #     padding_idx=None,
-        #     max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
-        #     norm_type=2
-        # )
+        self.learnt_position_embedding = torch.nn.Embedding(
+            num_embeddings=self.context_length,
+            embedding_dim=self.d_model,
+            padding_idx=None,
+            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
+            norm_type=2
+        )
         self.dropout = torch.nn.Dropout(p=0.1)
         self.initialize_model_parameters(scaling_factor=1/np.sqrt(2*self.n_layers))
         self.print_param_stats()
@@ -124,8 +124,8 @@ class GPT2Model(torch.nn.Module):
         assert seq_len <= self.context_length, "Sequence length exceeds model context_length"
         x_learnt_embeddings = self.embedding(x)
         # self.logger.debug(f"x_learnt_embeddings.shape = {x_learnt_embeddings.shape} | x_learnt_embeddings.device = {x_learnt_embeddings.device} | x_learnt_embeddings.dtype = {x_learnt_embeddings.dtype}")
-        x_pos_embeddings = self.position_embedding(x)
-        # x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len, device=x.device)).unsqueeze(0)
+        # x_pos_embeddings = self.position_embedding(x)
+        x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len, device=x.device)).unsqueeze(0)
         # self.logger.debug(f"x_pos_embeddings.shape = {x_pos_embeddings.shape} | x_pos_embeddings.device = {x_pos_embeddings.device} | x_pos_embeddings.dtype = {x_pos_embeddings.dtype}")
         
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
