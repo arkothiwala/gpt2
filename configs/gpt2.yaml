@@ -45,3 +45,8 @@ data:
   valid_bin_file_path: assets/processed_data/openwebtext_valid.bin
   test_bin_file_path: assets/processed_data/openwebtext_test.bin
   prefetch_factor: 2
+
+lr_finder:
+  start_lr: 1e-6
+  end_lr: 1
+  num_steps: 400
