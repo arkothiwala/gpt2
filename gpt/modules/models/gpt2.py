@@ -31,7 +31,8 @@ class GPT2Model(torch.nn.Module):
                     n_heads=self.n_heads, 
                     scaling_factor=1/np.sqrt(2*self.n_layers), 
                     context_length=self.context_length,
-                    attention_dropout=0.1
+                    attention_dropout=0.1,
+                    logger=self.logger
                 )
             )
         # add final layer normalization
@@ -47,17 +48,34 @@ class GPT2Model(torch.nn.Module):
         )
         self.dropout = torch.nn.Dropout(p=0.1)
         self.initialize_model_parameters(scaling_factor=1/np.sqrt(2*self.n_layers))
-        self.print_weight_std(self.transformer_layers)
+        self.print_param_stats()
 
-    def print_weight_std(self, model):
+    def print_param_stats(self, include_bias=False, filter_fn=None):
+        """
+        Print standard deviation of model parameters.
+
+        Args:
+            include_bias (bool): Whether to include bias terms.
+            filter_fn (callable): Optional function (name, param) -> bool
+                                to filter parameters.
+        """
         self.logger.info(f"{'Layer Name':<60} | {'Std Dev':<10}")
         self.logger.info("-" * 75)
-        
-        for name, param in model.named_parameters():
-            # We only care about weights, not biases
-            if 'weight' in name:
-                std = param.std().item()
-                self.logger.info(f"{name:<60} | {std:.6f}")
+
+        for name, param in self.named_parameters():
+            if not param.requires_grad:
+                continue
+
+            # Default filtering logic
+            if not include_bias and 'bias' in name:
+                continue
+
+            # Custom filter override
+            if filter_fn is not None and not filter_fn(name, param):
+                continue
+
+            std = param.std().item()
+            self.logger.info(f"{name:<60} | {std:.6f}")
         
     def initialize_model_parameters(self, scaling_factor):
         self.logger.info(f"scaling_factor = {scaling_factor}")
@@ -80,30 +98,38 @@ class GPT2Model(torch.nn.Module):
                     torch.nn.init.ones_(module.weight)
                     torch.nn.init.zeros_(module.bias)
                     # self.logger.info(f"After initialization - LayerNorm weight norm: {module.weight.norm().item()}, bias norm: {module.bias.norm().item()}")
-                    
                 if isinstance(module, TransformerBlock):
                     # scale only residual connection weights correctly
                     torch.nn.init.normal_(module.MHA.in_proj_weight, mean=0.0, std=0.02)
                     torch.nn.init.normal_(module.MHA.out_proj.weight, mean=0.0, std=0.02)
                     self.logger.info("Initializing TransformerBlock MHA in_proj_weight with normal distribution")
+                    self.logger.info(f"module.MHA.out_proj.weight.std() before scaling = {module.MHA.out_proj.weight.std().item()}")
+                    self.logger.info(f"module.FFN.linear_projection.weight.std() before scaling = {module.FFN.linear_projection.weight.std().item()}")
                     
                     module.MHA.out_proj.weight.mul_(scaling_factor)
                     module.FFN.linear_projection.weight.mul_(scaling_factor)
+                    self.logger.info(f"module.MHA.out_proj.weight.std() after scaling = {module.MHA.out_proj.weight.std().item()}")
+                    self.logger.info(f"module.FFN.linear_projection.weight.std() after scaling = {module.FFN.linear_projection.weight.std().item()}")
+                    self.logger.info(f"Scaling TransformerBlock MHA out_proj.weight and FFN linear_projection.weight by scaling_factor = {scaling_factor}")
 
 
     def forward(self, x, return_proba = False):
-        # self.logger.info(f"x.shape = {x.shape}")
+        # self.logger.debug(f"x.shape = {x.shape} | x.device = {x.device} | x.dtype = {x.dtype}")
         batch_size, seq_len = x.shape
         assert seq_len <= self.context_length, "Sequence length exceeds model context_length"
         x_learnt_embeddings = self.embedding(x)
+        # self.logger.debug(f"x_learnt_embeddings.shape = {x_learnt_embeddings.shape} | x_learnt_embeddings.device = {x_learnt_embeddings.device} | x_learnt_embeddings.dtype = {x_learnt_embeddings.dtype}")
         # x_pos_embeddings = self.position_embedding(self.context_length)
         x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len, device=x.device)).unsqueeze(0)
+        # self.logger.debug(f"x_pos_embeddings.shape = {x_pos_embeddings.shape} | x_pos_embeddings.device = {x_pos_embeddings.device} | x_pos_embeddings.dtype = {x_pos_embeddings.dtype}")
         
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
         # x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1) # MISTAKE - I had initially used functional dropout here w/o train v/s inference mode check. Moving it to Dropout module which internally manages train v/s inference mode and also makes code cleaner.
         x_embeddings = self.dropout(x_embeddings)
         x_logits = self.transformer_layers(x_embeddings)
+        # self.logger.debug(f"z.shape = {x_logits.shape} | z.device = {x_logits.device} | z.dtype = {x_logits.dtype}")
         x_logits = x_logits@self.embedding.weight.T
+        # self.logger.debug(f"x_logits.shape = {x_logits.shape} | x_logits.device = {x_logits.device} | x_logits.dtype = {x_logits.dtype}")
         if return_proba:
             return torch.nn.functional.softmax(input=x_logits, dim=-1)
         else:
