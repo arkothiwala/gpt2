@@ -3,6 +3,7 @@ import collections
 import numpy as np
 from gpt.modules.embedding.sinusoidal import SinusoidalPositionalEmbeddings
 from gpt.modules.norm.layernorm import CustomLayerNorm
+from torch.nn import LayerNorm as TorchLayerNorm
 
 import logging
 logger = logging.getLogger(__name__)
@@ -25,8 +26,8 @@ class TransformerBlock(torch.nn.Module):
         self.FFN = torch.nn.Sequential(collections.OrderedDict([
             ("linear_expansion", torch.nn.Linear(in_features=d_model, out_features=4*d_model, bias=True)),
             # Mistake - I had initially forgotten the activation layer
-            ("activation", torch.nn.GELU()),
-            ("dropout", torch.nn.Dropout(p=0.1)),
+            ("activation", torch.nn.GELU(approximate='tanh')),
+            # ("dropout", torch.nn.Dropout(p=0.1)),
             ("linear_projection", torch.nn.Linear(in_features=4*d_model, out_features=d_model, bias=True))
         ]))
         
@@ -85,12 +86,12 @@ class TransformerBlock(torch.nn.Module):
             #     torch.nn.init.normal_(self.MHA.v_proj_weight, mean=0.0, std=0.02)
             #     torch.nn.init.zeros_(self.MHA.v_proj_bias)
         
-        self.layer_norm_mha = CustomLayerNorm(d_model=self.d_model)
-        self.layer_norm_ffn = CustomLayerNorm(d_model=self.d_model)
+        self.layer_norm_mha = TorchLayerNorm(normalized_shape=self.d_model)
+        self.layer_norm_ffn = TorchLayerNorm(normalized_shape=self.d_model)
 
         self.register_buffer(
             "causal_mask",
-            torch.triu(torch.ones(self.context_length, self.context_length), diagonal=1).bool()
+            torch.triu(torch.ones(self.context_length, self.context_length)*float("-inf"), diagonal=1)
         )
 
 

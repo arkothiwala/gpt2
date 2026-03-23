@@ -337,7 +337,7 @@ if __name__ == '__main__':
     global_logits_max = 0
     global_logits_min = 0
     global_logits_mean = 0
-    optimizer.zero_grad()
+    optimizer.zero_grad(set_to_none=True)
     
     # iterate through the micro_batch_size
     global_step = 0 if args.checkpoint_path is None else checkpoint["global_step"]
@@ -454,7 +454,7 @@ if __name__ == '__main__':
                     checkpoint['cuda_rng_state'] = torch.cuda.get_rng_state_all()
                 torch.save(checkpoint, checkpoint_path)
 
-            optimizer.zero_grad()
+            optimizer.zero_grad(set_to_none=True)
             total_accumulated = 0
             global_batch_loss = 0
             global_logits_variance = 0
