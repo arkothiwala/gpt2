@@ -29,7 +29,7 @@ class GPT2Model(torch.nn.Module):
         #     max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
         #     norm_type=2
         # )
-        self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
+        # self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
         self.embedding_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         self.transformer_layers = torch.nn.Sequential()
         self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
@@ -126,13 +126,13 @@ class GPT2Model(torch.nn.Module):
         x_learnt_embeddings = self.embedding(x)
         # self.logger.info(f"x_learnt_embeddings.var = {str(x_learnt_embeddings.var().item())} | x_learnt_embeddings.mean = {str(x_learnt_embeddings.mean().item())}")
         # self.logger.debug(f"x_learnt_embeddings.shape = {x_learnt_embeddings.shape} | x_learnt_embeddings.device = {x_learnt_embeddings.device} | x_learnt_embeddings.dtype = {x_learnt_embeddings.dtype}")
-        x_pos_embeddings = self.position_embedding(x)
+        # x_pos_embeddings = self.position_embedding(x)
         # self.logger.info(f"x_pos_embeddings.var = {str(x_pos_embeddings.var().item())} | x_pos_embeddings.mean = {str(x_pos_embeddings.mean().item())}")
         # x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len, device=x.device)).unsqueeze(0)
         # self.logger.debug(f"x_pos_embeddings.shape = {x_pos_embeddings.shape} | x_pos_embeddings.device = {x_pos_embeddings.device} | x_pos_embeddings.dtype = {x_pos_embeddings.dtype}")
-        
-        x_embeddings = x_learnt_embeddings + x_pos_embeddings
-        x_embeddings = self.embedding_layer_norm(x_embeddings)
+        x_embeddings = x_learnt_embeddings
+        # x_embeddings = x_learnt_embeddings + x_pos_embeddings
+        # x_embeddings = self.embedding_layer_norm(x_embeddings)
         # self.logger.info(f"post layer norm - x_embeddings.var = {str(x_embeddings.var().item())} | x_embeddings.mean = {str(x_embeddings.mean().item())}")
         # x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1) # MISTAKE - I had initially used functional dropout here w/o train v/s inference mode check. Moving it to Dropout module which internally manages train v/s inference mode and also makes code cleaner.
         # x_embeddings = self.dropout(x_embeddings)
