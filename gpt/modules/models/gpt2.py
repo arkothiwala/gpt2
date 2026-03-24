@@ -22,14 +22,14 @@ class GPT2Model(torch.nn.Module):
             max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
-        self.learnt_position_embedding = torch.nn.Embedding(
-            num_embeddings=self.context_length,
-            embedding_dim=self.d_model,
-            padding_idx=None,
-            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
-            norm_type=2
-        )
-        # self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
+        # self.learnt_position_embedding = torch.nn.Embedding(
+        #     num_embeddings=self.context_length,
+        #     embedding_dim=self.d_model,
+        #     padding_idx=None,
+        #     max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
+        #     norm_type=2
+        # )
+        self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
         self.transformer_layers = torch.nn.Sequential()
         self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         # add sequential layers
@@ -124,8 +124,8 @@ class GPT2Model(torch.nn.Module):
         assert seq_len <= self.context_length, "Sequence length exceeds model context_length"
         x_learnt_embeddings = self.embedding(x)
         # self.logger.debug(f"x_learnt_embeddings.shape = {x_learnt_embeddings.shape} | x_learnt_embeddings.device = {x_learnt_embeddings.device} | x_learnt_embeddings.dtype = {x_learnt_embeddings.dtype}")
-        # x_pos_embeddings = self.position_embedding(x)
-        x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len, device=x.device)).unsqueeze(0)
+        x_pos_embeddings = self.position_embedding(x)
+        # x_pos_embeddings = self.learnt_position_embedding(torch.arange(start=0, end=seq_len, device=x.device)).unsqueeze(0)
         # self.logger.debug(f"x_pos_embeddings.shape = {x_pos_embeddings.shape} | x_pos_embeddings.device = {x_pos_embeddings.device} | x_pos_embeddings.dtype = {x_pos_embeddings.dtype}")
         
         x_embeddings = x_learnt_embeddings + x_pos_embeddings
