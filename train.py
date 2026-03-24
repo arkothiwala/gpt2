@@ -549,6 +549,8 @@ if __name__ == '__main__':
             global_batch_loss = 0
             global_logits_variance = 0
             global_logits_max = 0
+            global_logits_min = 0
+            global_logits_mean = 0
     wandb.finish()
 
     # # run validation after n_epoch interval

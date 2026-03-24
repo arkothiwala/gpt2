@@ -29,7 +29,7 @@ class TransformerBlock(torch.nn.Module):
             ("linear_expansion", torch.nn.Linear(in_features=d_model, out_features=4*d_model, bias=True)),
             # Mistake - I had initially forgotten the activation layer
             ("activation", torch.nn.GELU(approximate='tanh')),
-            # ("dropout", torch.nn.Dropout(p=0.1)),
+            ("dropout", torch.nn.Dropout(p=0.1)),
             ("linear_projection", torch.nn.Linear(in_features=4*d_model, out_features=d_model, bias=True))
         ]))
         
