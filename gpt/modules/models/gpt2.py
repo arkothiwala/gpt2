@@ -14,8 +14,6 @@ class GPT2Model(torch.nn.Module):
         self.n_layers = n_layers
         self.vocab_size = vocab_size
         self.context_length = context_length
-        self.transformer_layers = torch.nn.Sequential()
-        self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         self.logger = logger
         self.embedding = torch.nn.Embedding(
             num_embeddings=self.vocab_size,
@@ -24,7 +22,16 @@ class GPT2Model(torch.nn.Module):
             max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
             norm_type=2
         )
+        self.learnt_position_embedding = torch.nn.Embedding(
+            num_embeddings=self.context_length,
+            embedding_dim=self.d_model,
+            padding_idx=None,
+            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
+            norm_type=2
+        )
         # self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
+        self.transformer_layers = torch.nn.Sequential()
+        self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         # add sequential layers
         for layer in range(self.n_layers):
             self.transformer_layers.append(
@@ -41,18 +48,11 @@ class GPT2Model(torch.nn.Module):
         self.transformer_layers.append(self.final_layer_norm)
         # predict token with softmax
         # self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
-        self.learnt_position_embedding = torch.nn.Embedding(
-            num_embeddings=self.context_length,
-            embedding_dim=self.d_model,
-            padding_idx=None,
-            max_norm=None, # changing max_norm to None -> will let model figure unless the training is unstable and we see exploding gradients.
-            norm_type=2
-        )
         self.dropout = torch.nn.Dropout(p=0.1)
         self.initialize_model_parameters(scaling_factor=1/np.sqrt(2*self.n_layers))
         self.print_param_stats()
 
-    def print_param_stats(self, include_bias=False, filter_fn=None):
+    def print_param_stats(self, include_bias=True, filter_fn=None):
         """
         Print standard deviation of model parameters.
 
