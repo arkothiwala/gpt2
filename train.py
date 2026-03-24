@@ -34,19 +34,88 @@ def validate_experiment_config(config):
 
     return True
 
-def get_modulewise_grad_norms(model, norm_type=2, prefix="norm/"):
+def get_modulewise_grad_stats(model, norm_type=2, prefix="grad/"):
     d = {}
-    def process_name(name):
-        return name.replace("transformer_layers.", "L").replace("linear_expansion","exp").replace("linear_projection", "proj").replace("layer_norm", "ln").replace("layer_norm", "ln")
-    for name, module in model.named_modules():
-        total_norm = 0.0
-        for param in module.parameters(recurse=False):
-            if param.grad is not None:
-                total_norm += param.grad.norm(norm_type).item() ** norm_type
 
-        if total_norm > 0:
-            total_norm = total_norm ** (1.0 / norm_type)
-            d[prefix + process_name(name)] = total_norm
+    def process_name(name):
+        return (
+            name.replace("transformer_layers.", "L")
+                .replace("linear_expansion", "exp")
+                .replace("linear_projection", "proj")
+                .replace("layer_norm", "ln")
+                .replace("out_proj","out")
+        )
+
+    for name, module in model.named_modules():
+        total_grad_sq = 0.0
+        total_param_sq = 0.0
+        total_params = 0
+
+        for param in module.parameters(recurse=False):
+            if param.grad is None:
+                continue
+
+            g = param.grad.data
+            w = param.data
+
+            total_grad_sq += g.norm(2).item() ** 2
+            total_param_sq += w.norm(2).item() ** 2
+            total_params += param.numel()
+
+        if total_params == 0:
+            continue
+
+        grad_norm = total_grad_sq ** 0.5
+        weight_norm = total_param_sq ** 0.5
+
+        # ✅ Key metrics
+        grad_rms = grad_norm / (total_params ** 0.5)
+        update_ratio = grad_norm / (weight_norm + 1e-12)
+
+        base = prefix + process_name(name)
+
+        d[base + "/norm"] = grad_norm              # raw (size dependent)
+        d[base + "/rms"] = grad_rms                # ✅ comparable across layers
+        d[base + "/update_ratio"] = update_ratio   # ✅ learning speed
+
+    return d
+
+def get_parameterwise_grad_stats(model, prefix="grad/"):
+    d = {}
+
+    def process_name(name):
+        return (
+            name.replace("transformer_layers.", "L")
+                .replace("linear_expansion", "exp")
+                .replace("linear_projection", "proj")
+                .replace("layer_norm", "ln")
+                .replace(".weight", ".w")
+                .replace(".bias", ".b")
+                .replace("out_proj","out")
+        )
+
+    for name, param in model.named_parameters():
+        if param.grad is None:
+            continue
+
+        g = param.grad.data
+        w = param.data
+
+        numel = param.numel()
+
+        grad_norm = g.norm(2).item()
+        weight_norm = w.norm(2).item()
+
+        # ✅ Comparable metrics
+        grad_rms = grad_norm / (numel ** 0.5)
+        update_ratio = grad_norm / (weight_norm + 1e-12)
+
+        base = prefix + process_name(name)
+
+        d[base + "/norm"] = grad_norm
+        d[base + "/rms"] = grad_rms
+        d[base + "/updt_rto"] = update_ratio
+
     return d
 
 if __name__ == '__main__':
@@ -432,6 +501,9 @@ if __name__ == '__main__':
             logger.info(f"unclipped_grad_norm_early = {unclipped_grad_norm_early} | unclipped_grad_norm = {unclipped_grad_norm} | clipped_grad_norm = {clipped_grad_norm}")
             logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} | unclipped_grad_norm = {unclipped_grad_norm} | clipped_grad_norm = {clipped_grad_norm}")
             
+            paramwise_grad_stats = get_parameterwise_grad_stats(model)
+            paramwise_total_grad_norm = torch.linalg.vector_norm(torch.tensor(list(paramwise_grad_stats.values())), ord=2)
+            
             wandb.log({
                 "train/loss": global_batch_loss.item() if isinstance(global_batch_loss, torch.Tensor) else global_batch_loss,
                 "train/perplexity": perplexity,
@@ -442,7 +514,9 @@ if __name__ == '__main__':
                 "train/logits_max": global_logits_max,
                 "train/logits_min": global_logits_min,
                 "train/logits_mean": global_logits_mean,
-                **get_modulewise_grad_norms(model)
+                **paramwise_grad_stats,
+                "train/derived_grad_norm": paramwise_total_grad_norm.item() if isinstance(paramwise_total_grad_norm, torch.Tensor) else paramwise_total_grad_norm
+
             })
             
             if autocast_dtype == torch.float16:
