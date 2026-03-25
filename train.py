@@ -337,8 +337,8 @@ if __name__ == '__main__':
     ########################################################################
 
 
-    if exp_config.get("optimizer").get("type") == "adam":
-        optimizer = torch.optim.Adam(
+    if exp_config.get("optimizer").get("type") == "adamw":
+        optimizer = torch.optim.AdamW(
             params=model.parameters(),
             lr = exp_config.get("optimizer").get("lr"),
             weight_decay = exp_config.get("optimizer").get("weight_decay"),
