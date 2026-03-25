@@ -68,3 +68,40 @@ Trainings:
     - add `is_causal=True` in MHA
     - model.compile() for inplace compilation
     - torch.set_float32_matmul_precision('high')
+
+
+----------------------------------
+Long due learnings
+----------------------------------
+- Optimizer - I misread optimiser config in GPT1 paper. Used Adam optmiser instead of AdamW. This was fine but the real mistake was using weight decay of 0.01 [good for AdamW but horrible for Adam]
+- Training speed - Flash attention works only with FP16 [yet to figure out why so] but we were using FP32 in our code. Upon trying different techniques, didn't get the confidence that FP16 was actually being used
+- Training speed - when using autocast we need scale and unscale only in FP16 but not in BF16.
+- LR finder - select either (1) mid point of the steepest descent OR (2) 1/10th of the point when loss start to increase -> both of it indicated that I should use max_lr = 0.0001 only
+- LR warmup steps - Ideally it should be 1 to 5% [for our data - 6-7B tokens with 128Mn param model with step size = 512 [as per chinchilla law, we should have used 2.5B tokens only], no of tokens per step is 0.5Mn and total steps are 13000] -> that translates in out warmup step to be close to 500-600 for an ideal start.
+- Model Training - Logit Variance - When the model is trained, logits variance continue to increase as un learnt model logits start from uniform distribution. Once model starts to learn, it pushes correct logits up and start to supress the incorrect ones.
+- Layers closer to residual network gets higher gradients as they are closer to the residual operation compared to the other counterparts [example - out projections in MHA and FFN have higher gradients compared to inprojection in MHA and linear expansion in FFN]
+- L0 gradients are often 5-8x of L11 -> there is a gradual reduction -> If you see a huge disparity, something is going wrong.
+- Importance of the right initialization - Initially my loss was starting with ~500 and came down to ~12 but this was wrong because theoretically random prediction would give ~11 loss as a starting point.
+    - The issue - I wasn't doing initialization [mean=0, std=0.02] that was done in the GPT2 paper so the layers got initialized to the pytorch defaults.
+    - Second BUG - my initialization was incorrect such that residual scaling was getting overwritten by linear layer scaling [0.02] -> this was happening because the forloop wasn't at layer/parameter level but it was at layer type level and there would be an overlap that would overwrite it
+- Learnt something about variance - I was doubting whether the residual scaling should be baked into the standard deviation or you do 0.02 intialization and then multiply the weights with residual scaling, turned out the result is exactly same.
+- Positional Encoding - This was the biggest trap. For a moment, I thought instead of learnable positional embeddings let's try using sinusoidal positional embeddings. It completely changed. While this didn't show any significant delta in the training loss, the delta in gradiant norm was very evident [one where gradients shaking massively v/s the other calm as still water] the gradient norm in the model training witg sinusoidal embeddings had gone to almost zero [~0.1-0.2].
+    - reference runs for comparison - 20260324_143208, 20260324_111412.
+    - tried adding layer norm after two embeddings are added but it didn't make the difference
+- I wasn't using GeLU with tanh appoximation [default option in torch was None which multiplies with a constant value]
+- I was confused about the 
+- Logging - This has massive value
+    - started logging gradient norm, logit stats [variance, min, max, mean], perplexity
+    - started logging parameter level gradient norms to compare across transformer block layers and across types of parameters [in_proj, out pro, FFN exp, FFN proj, Layer Norm]
+- Architecture creation/init - it is best if we create the layers in the order than model.named_modules and model.named_parameters will be in the same order.
+- Torch is unstable - always use parameters explicitly and hand over less work to the torch. Examples as following:
+    - if attn_mask is boolean, then depending on the torch version it may create different mask.
+    - is_causal as just a flag was fine earlier but in the newer versions it also needs attn_mask
+    - buggy and prone to silent failures - there was a bug in torch that if you pass `need_weights=True` and `is_causal=True` then it will actually not use causal mask w/o any warning or errors. This also happened because I was using torch 2.0.0 and the world had moved to much newer version. Still stable releases have bugs.
+- Causal Mask - better create and pass the additive mask in the forward pass.
+- CustomLayerNorm vs TorchLayerNorm - torch actually makes the fused layer dynamically if you use native torch layer norm instead of your own.
+- Checkpointing - crucial to save the seeds with <>. Yet to figure out how to store dataloader state so that it gives the data it hasn't saved v/s the one already learnt. Dataloader is still unsolved problem for me [folks may have already done it]
+- Gradient norm is important
+- Even if you clip the norm, direction isn't solved -> so always try to keep the gradients under control [model learns little but gradients are high -> likely the direction is also wrong]
+- Loss scaling for gradient accumulation - Loss should scaled according to the gradient accumulation steps otherwise the gradients become so high because loss.backward() add the gradients
+- LR schedular - it is important because we need ramp up and cosine annealing. Critical part is what is max_lr [calculate it as per LR schedular] and warm_up steps [1-5% of the learning steps]
