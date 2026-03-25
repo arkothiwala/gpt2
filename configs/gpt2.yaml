@@ -24,7 +24,7 @@ optimizer:
 scheduler:
   warmup_start_factor: 0.00001
   warmup_end_factor: 1.0
-  warmup_steps: 2000
+  warmup_steps: 500
   schedule: cosine
 
 # all configs for training loop
