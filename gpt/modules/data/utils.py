@@ -3,6 +3,7 @@ import pyarrow.parquet as pq
 import tiktoken
 import torch
 import random
+import time
 import numpy as np
 from tqdm import tqdm
 tqdm.pandas()
@@ -28,13 +29,15 @@ class DataUtils:
             # For each parquet file, encode and write tokenized data to binary file
             for parquet_file in tqdm(sorted(os.listdir(raw_data_folder)), desc="Processing parquet files"):
                 if parquet_file.endswith(".parquet"):
-                    pf = pq.ParquetFile(os.path.join(raw_data_folder, parquet_file))
+                    file_path = os.path.join(raw_data_folder, parquet_file)
+                    print(f"Processing file: {file_path}")
+                    pf = pq.ParquetFile(file_path)
 
                     # safer option compared to reading entire file at once
                     for row_group_index in range(pf.num_row_groups):
                         row_group = pf.read_row_group(row_group_index, columns=[text_column_name])
                         text_data = row_group[text_column_name].to_pylist()
-                        encoded_text = tokenizer.encode_batch(text=text_data, num_threads=os.cpu_count())
+                        encoded_text = tokenizer.encode_batch(text=text_data, num_threads=os.cpu_count(), allowed_special={"<|endoftext|>"})
 
                         # encoded_with_eot = [enc + [eot_token_id] for enc in encoded_text]
                         for enc in encoded_text:
@@ -75,16 +78,35 @@ class DataUtils:
 
 if __name__ == "__main__":
     tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
-    split = "train"
+    output_dir = "assets/processed_data/finewebedu"
+    os.makedirs(output_dir, exist_ok=True)
+    split = "test"
+    start_time = time.time()
+    # DataUtils.tokenize_data(
+    #     # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
+    #     raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/{split}/"),
+    #     output_binary_path=os.path.join(output_dir, f"openwebtext_{split}.bin"), 
+    #     tokenizer=tokenizer
+    # )
+    # DataUtils.create_eot_index(
+    #     tokenized_binary_path=os.path.join(output_dir, f"openwebtext_{split}.bin"),
+    #     binfile_obj_dtype=np.uint16,
+    #     query_value=tokenizer.eot_token,
+    #     output_index_path=os.path.join(output_dir, f"openwebtext_{split}_eot_index.bin")
+    # )
+
     DataUtils.tokenize_data(
         # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
-        raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/{split}/"),
-        output_binary_path=f"assets/processed_data/openwebtext_{split}.bin", 
+        # raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/10BT/{split}/"),
+        raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/{split}/"),
+        output_binary_path=os.path.join(output_dir, f"{split}.bin"), 
         tokenizer=tokenizer
     )
     DataUtils.create_eot_index(
-        tokenized_binary_path=f"assets/processed_data/openwebtext_{split}.bin",
+        tokenized_binary_path=os.path.join(output_dir, f"{split}.bin"),
         binfile_obj_dtype=np.uint16,
         query_value=tokenizer.eot_token,
-        output_index_path=f"assets/processed_data/openwebtext_{split}_eot_index.bin"
+        output_index_path=os.path.join(output_dir, f"{split}_eot_index.bin")
     )
+    end_time = time.time()
+    print(f"Data tokenization and EoT index creation completed in {(end_time - start_time):.2f} seconds.")
