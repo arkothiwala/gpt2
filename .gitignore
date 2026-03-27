@@ -50,3 +50,4 @@ training_runs/
 *.ckpt
 nohup.out
 wandb/
+*temp*
