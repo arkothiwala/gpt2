@@ -143,3 +143,21 @@ class GPT2Model(torch.nn.Module):
             return torch.nn.functional.softmax(input=x_logits, dim=-1)
         else:
             return x_logits
+
+    def decode(self, starter_text, tokenizer, max_length=1024):
+        self.eval()
+        device = next(self.parameters()).device
+        indices = torch.tensor(tokenizer.encode(starter_text)).unsqueeze(0).to(device)
+        
+        while indices.shape[1] < max_length:
+            print(f"indices.shape = {indices.shape}")
+            input_ids = indices[:, -self.context_length:]
+            with torch.no_grad():
+                logits = self(input_ids)
+            
+            last_token_logits = logits[:, -1, :]
+            next_token = torch.argmax(last_token_logits, dim=-1, keepdim=True)
+            
+            indices = torch.cat((indices, next_token), dim=1)
+            
+        return tokenizer.decode(indices[0].tolist())
