@@ -7,6 +7,7 @@ import wandb
 from gpt.modules.models.gpt2 import GPT2Model
 from gpt.modules.data.dataset import GPTDatasetBinFile
 from gpt.modules.data.utils import DataUtils
+from gpt.modules.utils.logger import CustomLogger
 from torch.utils.data import DataLoader
 from gpt.modules.optimizer.lr_finder import run_lr_finder
 from torch.amp import autocast, GradScaler
@@ -124,31 +125,19 @@ if __name__ == '__main__':
     parser.add_argument("--checkpoint_path", default=None, help="checkpoint path to resume training from")
     args = parser.parse_args()
 
-    # Logging config
+    # Experiment config and logger
     now = datetime.now()
     exp_run_time = now.strftime("%Y%m%d_%H%M%S")
-    log_dir = os.path.join("training_runs", exp_run_time)
-    checkpoint_dir = os.path.join(log_dir, "checkpoints")
-    os.makedirs(log_dir, exist_ok=True)
+    exp_dir = os.path.join("training_runs", exp_run_time)
+    os.makedirs(exp_dir, exist_ok=True)
+    checkpoint_dir = os.path.join(exp_dir, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
-    log_file_path = os.path.join(log_dir, "model.log")
-
-    logger = logging.getLogger(__name__)
-    logger.setLevel(logging.DEBUG)  # default level
-
-    c_handler = logging.StreamHandler()
-    f_handler = logging.FileHandler(log_file_path)
-
-    c_handler.setLevel(logging.INFO)
-    f_handler.setLevel(logging.DEBUG)
-
-    # Create formatters and add it to handlers
-    log_format = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-    c_handler.setFormatter(log_format)
-    f_handler.setFormatter(log_format)
-
-    logger.addHandler(c_handler)
-    logger.addHandler(f_handler)
+    logger = CustomLogger.get_logger(base_dir=exp_dir)
+    
+    
+    #########################################################################
+    ############################## Load Config ##############################
+    #########################################################################
     
     logger.info(args)
     logger.info(f"Loading config from: {args.model_yaml}")
