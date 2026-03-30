@@ -472,6 +472,9 @@ if __name__ == '__main__':
 
         # handle gradient accumulation
         if total_accumulated % global_batch_size == 0:
+            ####################################################################################
+            ############################# Log Metrics to WandB #################################
+            ####################################################################################
             global_batch_loss = global_batch_loss / accumulation_steps
             global_logits_variance = global_logits_variance / accumulation_steps
             global_logits_max = global_logits_max / accumulation_steps
@@ -482,13 +485,8 @@ if __name__ == '__main__':
             except OverflowError:
                 perplexity = float('inf')
             unclipped_grad_norm_early = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
-            # Unscales the gradients of optimizer's assigned params in-place
-            if autocast_dtype == torch.float16:
-                grad_scaler.unscale_(optimizer)
-            unclipped_grad_norm = torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=exp_config.get("training").get("max_grad_norm"), error_if_nonfinite=False)
-            clipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
-            logger.info(f"unclipped_grad_norm_early = {unclipped_grad_norm_early} | unclipped_grad_norm = {unclipped_grad_norm} | clipped_grad_norm = {clipped_grad_norm}")
-            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} | unclipped_grad_norm = {unclipped_grad_norm} | clipped_grad_norm = {clipped_grad_norm}")
+            unclipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
+            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} | unclipped_grad_norm = {unclipped_grad_norm}")
             
             paramwise_grad_stats = get_parameterwise_grad_stats(model)
             paramwise_total_grad_norm = torch.linalg.vector_norm(torch.tensor(list(paramwise_grad_stats.values())), ord=2)
@@ -508,14 +506,36 @@ if __name__ == '__main__':
 
             })
             
+            ####################################################################################
+            ################ Optimizer.step() | LR_scheduler.step() | Reset ####################
+            ####################################################################################
+            # Unscales the gradients of optimizer's assigned params in-place
+            if autocast_dtype == torch.float16:
+                grad_scaler.unscale_(optimizer)
+                
+            # clip the gradients
+            torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=exp_config.get("training").get("max_grad_norm"), error_if_nonfinite=False)
+            
+            # take optimizer step and update the lr scheduler
             if autocast_dtype == torch.float16:
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
                 optimizer.step()
             lr_scheduler.step()
+            optimizer.zero_grad(set_to_none=True)
 
             global_step += 1
+            total_accumulated = 0
+            global_batch_loss = 0
+            global_logits_variance = 0
+            global_logits_max = 0
+            global_logits_min = 0
+            global_logits_mean = 0
+            
+            ####################################################################################
+            ################## save checkpoints after each checkpoint_interval #################
+            ####################################################################################
             if global_step % exp_config.get("training").get("checkpoint_interval") == 0:
                 checkpoint_path = os.path.join(checkpoint_dir, f"checkpoint_{global_step}.pt")
                 logger.info(f"Saving checkpoint to {checkpoint_path}")
@@ -533,14 +553,9 @@ if __name__ == '__main__':
                     checkpoint['cuda_rng_state'] = torch.cuda.get_rng_state_all()
                 torch.save(checkpoint, checkpoint_path)
 
-            optimizer.zero_grad(set_to_none=True)
-            total_accumulated = 0
-            global_batch_loss = 0
-            global_logits_variance = 0
-            global_logits_max = 0
-            global_logits_min = 0
-            global_logits_mean = 0
-
+            ####################################################################################
+            ################### run validation after each validation_interval ##################
+            ####################################################################################
             if global_step % exp_config.get("training").get("validation_interval") == 0:
                 logger.info(f"Running validation at global step {global_step}")
                 valid_step = 0
