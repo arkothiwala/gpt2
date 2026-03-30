@@ -38,6 +38,11 @@ training:
   dataloader_num_workers: 2
   checkpoint_interval: 100
   max_grad_norm: 1
+  validation_interval: 50
+
+validation:
+  global_batch_size: 1024
+  micro_batch_size: 16
 
 # all configs for dataset and dataloader
 data:
@@ -49,4 +54,4 @@ data:
 lr_finder:
   start_lr: 1e-6
   end_lr: 1
-  num_steps: 400
+  num_steps: 400  

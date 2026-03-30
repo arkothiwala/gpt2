@@ -258,7 +258,7 @@ if __name__ == '__main__':
 
     valid_dl = DataLoader(
         dataset=valid_ds,
-        batch_size=exp_config.get("training").get("micro_batch_size"),
+        batch_size=exp_config.get("validation").get("micro_batch_size"),
         shuffle=False,
         # sampler: Sampler | Iterable | None = None,
         # batch_sampler: Sampler[Sequence] | Iterable[Sequence] | None = None,
@@ -540,13 +540,41 @@ if __name__ == '__main__':
             global_logits_max = 0
             global_logits_min = 0
             global_logits_mean = 0
+
+            if global_step % exp_config.get("training").get("validation_interval") == 0:
+                logger.info(f"Running validation at global step {global_step}")
+                valid_step = 0
+                global_valid_loss = 0
+                gloabl_valid_steps = exp_config.get("validation").get("global_batch_size") // exp_config.get("validation").get("micro_batch_size")
+                model.eval() # set to eval mode before running validation loop
+                for valid_batch_idx, (batch_x_valid, batch_y_valid) in enumerate(tqdm(valid_dl, desc="validation batch progress"), start=0):
+                    batch_x_valid = batch_x_valid.to(device=device)
+                    batch_y_valid = batch_y_valid.to(device=device) if torch.cuda.is_available() else batch_y_valid
+
+                    with torch.no_grad():
+                        if autocast_dtype in [torch.float16, torch.bfloat16]:
+                            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+                                with autocast(device_type=device.type, dtype=autocast_dtype):
+                                    valid_logits = model(batch_x_valid)
+                                    valid_loss = cross_entropy_loss(input=valid_logits.view(-1, valid_logits.size(-1)), target=batch_y_valid.view(-1))
+                        else:
+                            valid_logits = model(batch_x_valid)
+                            valid_loss = cross_entropy_loss(input=valid_logits.view(-1, valid_logits.size(-1)), target=batch_y_valid.view(-1))
+                        
+                        global_valid_loss += valid_loss.item() / gloabl_valid_steps
+
+                    valid_step += 1
+                    if valid_step >= gloabl_valid_steps:
+                        global_valid_perplexity = math.exp(global_valid_loss) if global_valid_loss < 700 else float('inf')
+                        logger.info(f"Gloabal Step {global_step} | valid_loss = {global_valid_loss} | valid_perplexity = {global_valid_perplexity}")
+                        wandb.log({
+                            "validation/loss": global_valid_loss,
+                            "validation/perplexity": global_valid_perplexity, # to avoid overflow in exp
+                            "validation/step":global_step
+                        })
+                        break
+                model.train()  # set back to train mode after validation
     wandb.finish()
-
-    # # run validation after n_epoch interval
-    # if epoch % exp_config.get("training").get("valid_epoch_interval") == 0:
-    #     model.eval()
-    #     # run batch predictions
-
         
     # # do forward pass, backward pass, accumulate gradient and update weights when global_batch_size is met
 
