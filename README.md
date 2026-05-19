@@ -5,11 +5,19 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
 
 <br>
 
+### Learnings
+1. large scale has its own challenges and highlights inefficiencies which could have been overlooked on a smaller scale.
+2. Develop low level code execution thinking/intuition to really understand what is happening under the hood. This helps early identify/prevent 
+    1. OOM errors [multiprocessing in spawn mode pickles data. This triggers reading entire data as it treats memmap as standard numpy aaray] 
+    2. slow execution [if you don't leverage multithreading in tokenization or use more threads than CPU cores] 
+    3. data leaks 
+    4. silent failures [not cloning y and then updating values at EOT masks]
+
 ### Dataset Preparation
 
 #### Which dataset
-- GPT2 was trained on the `WebText` data but the dataset wasn't released. 
-- So I chose to use `openwebtext` dataset available on the [huggingface](https://huggingface.co/datasets/Skylion007/openwebtext#plain_text) as the author claims to be open-source replication of the WebText dataset.
+- GPT2 was trained on the `WebText` data but the dataset wasn't released by OpenAI. 
+- So `openwebtext` dataset available on the [huggingface](https://huggingface.co/datasets/Skylion007/openwebtext#plain_text) was chosen as the author claims to be open-source replication of the WebText dataset.
 - The dataset is in a `List[str]` format
 
 #### Loading the dataset
@@ -17,6 +25,7 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
     1. load the entire dataset in memory during `__init__` function itself [works when data fits in the memory] and tokenize in the __init__ function itself.
     2. read file and tokenize content in the `__getitem__` function - this is efficient for large scale data that doesn't fit in memory [often used in computer vision].
 
+    <br>
     <details>
     <summary> First Attempt with first approach </summary>
 
@@ -58,7 +67,7 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
     - **Problem** - Then how do you handle documents of varying length in model training?
     - **Solution** - Sequence packing - concatenate documents into `<DOC1>_<EOT>_<DOC2>_<EOT>_<DOC3>` format.
 
-
+    <br>
     <details>
     <summary> Second Attempt with sequence packing </summary>
 
@@ -109,12 +118,13 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
         1. tokenize the data and store it in seqeunce packing format `<DOC1>_<EOT>_<DOC2>_<EOT>_<DOC3>` in a binary file
         2. read the binary file in a streaming mode [instead of loading in memory by creating copy, directly read from disk]
 
+    <br>
     <details>
-        <summary> Third Attempt with pre-tokenization + streaming read </summary>
+    <summary> Third Attempt with pre-tokenization + streaming read </summary>
         
-        [GPTDatasetBinFile permalink](https://github.com/arkothiwala/gpt2/blob/485df8462a08bf6d6b0fb2f6c5c66ea13a0f8fef/gpt/modules/data/dataset.py#L110)
-    </details>
-        
+    - [GPTDatasetBinFile permalink](https://github.com/arkothiwala/gpt2/blob/485df8462a08bf6d6b0fb2f6c5c66ea13a0f8fef/gpt/modules/data/dataset.py#L110)
+    </details>  
+    
     - This gave a blazing fast reading speed while being able to load the whole data eventually in streaming mode.
 
     <details>
@@ -124,5 +134,9 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
         - Benchmarking done with different num_threads parameter shows interesting results.
         - Despite my laptop having 12 cores. We got the best performance at num_thread = 8
         - For more details, one can take a look at the [tiktokenizer batch_encode benchmarking report](../benchmarking/readme.md)
-    - 
+    - initialising memmap in __init__ along with `num_workers>0` may create [issues](https://claude.ai/share/d0450442-b974-451e-bd21-dec8907e3464) depending on the worker process start method [fork, spawn or forkserver].
+        - This can blow up the memory if the workers make in-memory copy due to type conversions or some other reasons.
+        - Or cause synchronization issues due to race condition if one worker writes to the memmap
+        - File discreptor may get exhausted if you are reading from multiple files with high no of workers.
+    - [PyTorch Memmap Multiprocessing Trap](https://gemini.google.com/share/d075e619575a): When using DataLoader with num_workers > 0, initializing an np.memmap in the main process (like inside __init__ or __len__) causes the system to crash exactly at iter(dataloader). This happens because PyTorch uses pickle to send the dataset to worker processes, and pickle mistakenly reads the entire disk-backed memmap into RAM to serialize it. The Fix: Calculate dataset length using os.path.getsize() and strictly delay calling np.memmap until inside the worker-executed __getitem__ method so the file reference is never pickled.
     </details>
