@@ -1,1 +1,0 @@
-[ ] during loss calculation ignore loss for EOT token's prediction [i.e. -100]

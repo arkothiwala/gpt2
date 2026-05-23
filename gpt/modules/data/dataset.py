@@ -59,6 +59,7 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
     def __init__(self, raw_data_path, num_threads=os.cpu_count(), min_seq_len=1, max_seq_len=512, min_start_idx=0):
         # load the raw data
         dataloader_start_time = time.time()
+        # This will become a bottleneck if the raw data is too large
         self.raw_data_df = GPTDataUtils.load_raw_data(path=raw_data_path)#"assets/raw_data")
         dataloader_end_time = time.time()
         # print(f"time to load raw data = {round(dataloader_end_time-dataloader_start_time, 4)} seconds")
@@ -66,14 +67,17 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
         # load the pretrained tokenizer by gpt2
         self.tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
 
-        self.raw_data_df['text'] = self.raw_data_df['text'] + '<|endoftext|>'
+        # MISTAKE - This would create a copy and then add <EOT> text
+        # self.raw_data_df['text'] = self.raw_data_df['text'] + '<|endoftext|>'
 
         batch_encode_start_time = time.time()
         self.tokens = self.tokenizer.encode_batch(text=self.raw_data_df['text'], num_threads=num_threads,  allowed_special={"<|endoftext|>"})
         unique_last_tokens = set([tokens[-1] for tokens in self.tokens])
         print(f"Unique last tokens: {unique_last_tokens}")
         assert len(unique_last_tokens) == 1, "All sequences should end with <|endoftext|> token"
-        self.tokens_flattened = torch.tensor(list(itertools.chain.from_iterable(self.tokens)))
+        # self.tokens_flattened = torch.tensor(list(itertools.chain.from_iterable(self.tokens)))
+        # LEARNING - This is faster than using itertools.chain.from_iterable, because it avoids creating an intermediate list of all tokens, and directly creates a tensor from the generator expression.
+        self.tokens_flattened = torch.tensor([x for sub in self.tokens for x in (*sub, 100)])
 
         batch_encode_end_time = time.time()
         print(f"num_thread = {num_threads} \t| raw_data_load_time = {round(dataloader_end_time-dataloader_start_time, 4)} \t| tokenizer_batch_encode_time = {round(batch_encode_end_time-batch_encode_start_time, 4)}")
@@ -92,11 +96,78 @@ class GPTDatasetSequancePacking(torch.utils.data.Dataset):
             start_idx = len(self.tokens_flattened) - self.max_seq_len - 1
             end_idx = len(self.tokens_flattened) - 1
         x = self.tokens_flattened[start_idx:end_idx]
-        y = self.tokens_flattened[start_idx+1:end_idx+1]
+        # MISTAKE - didn't clone y tensor, which caused the original tokens_flattened tensor to be modified when we set the EOT_mask to -100
+        y = self.tokens_flattened[start_idx+1:end_idx+1].clone()
         
         # mask the loss for the tokens which are after <|endoftext|> token, because those tokens are not actually seen by the model during training, and we don't want the model to learn from those tokens.
         # this will make it slow though due to finding EOT mask for each sequence
         EOT_mask = (x == self.tokenizer.eot_token)
         # print(f"EOT_Mask | x = {x[EOT_mask]} | y = {y[EOT_mask]}")
-        y[EOT_mask] = -100
+        y[EOT_mask] = torch.tensor(-100) # -100 is the default ignore index for CrossEntropyLoss in PyTorch
         return x, y
+
+
+class GPTDatasetBinFile(torch.utils.data.Dataset):
+    def __init__(self, file_path, context_length, binfile_dtype, eot_token, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.context_length = context_length
+        self.file_path = file_path
+        self.binfile_dtype = binfile_dtype
+        self.eot_token = eot_token
+        
+        assert os.path.splitext(file_path)[1] == '.bin', f"file_path must point to a .bin file. invalid file_path = {file_path}"
+        # read the binary file and create memmap object
+        self.data = None
+
+    def ensure_memmap(self):
+        if self.data is None:
+            self.data = np.memmap(
+                filename=self.file_path, 
+                dtype=self.binfile_dtype, 
+                mode='r'
+            )
+        
+    def __len__(self):
+        # self.ensure_memmap()
+        # # MISTAKE - initially didn't len(x)-1
+        # # return (len(self.data)-1) // self.context_length
+        # return (self.data.shape[0]-1) // self.context_length
+    
+        # MISTAKE - len(self) is called by the dataloader before spawning worker processes hence not serving the purpose of the lazy loading of memmap object
+        # ref - https://gemini.google.com/share/40b625502783
+        file_size_bytes = os.path.getsize(self.file_path)
+        element_size_bytes = np.dtype(self.binfile_dtype).itemsize
+        total_elements = file_size_bytes // element_size_bytes
+        return (total_elements-1) // self.context_length
+
+    def __getitem__(self, index):
+        self.ensure_memmap()
+        # check_1 - idx should not be less than or eq. len
+        assert 0 <= index < len(self), "index out of bound"
+
+        # assign start and end index
+        x_start_idx = index*self.context_length
+        x_end_idx = (index+1)*self.context_length
+        y_start_idx = x_start_idx + 1
+        y_end_idx = x_end_idx + 1
+
+        # MISTAKE | PERFORMANCE_IMPACT - below approach reads twice -> causing 2x disk pressure, 2x memory because for both we are doing astype(np.int64).
+        # x = self.data[x_start_idx:x_end_idx].astype(np.int64)
+        # y = self.data[y_start_idx:y_end_idx].astype(np.int64)
+
+        # x_tensor = torch.from_numpy(x)
+        # y_tensor = torch.from_numpy(y)
+
+        # This is better compared to above
+        xy_data = torch.from_numpy(self.data[x_start_idx:y_end_idx].astype(np.int64))
+        # MISTAKE - I didn't clone y_tensor thinking we aren't looking at self.data anymore
+        # HOWEVER, x_tensor and y_tensor both share the same xy_data -> so chaning value in y_tensor changes x_tensor as well leading to out of index error
+        x_tensor, y_tensor = xy_data[:-1], xy_data[1:].clone()
+
+
+        # here we don't need to clone the y_tensor because we are doing .astype(np.int64) so original data in memmap is not modified.
+        EOT_mask = (x_tensor == self.eot_token) # use the eot_token provided during initialization
+        # MISTAKE | PERFORMANCE_IMPACT = was using torch.tensor(-100) which creates a new tensor on CPU every time, instead we can directly use -100 which will be broadcasted to the shape of y_tensor[EOT_mask]
+        y_tensor[EOT_mask] = -100 # -100 is the default ignore index for CrossEntropyLoss in PyTorch
+
+        return x_tensor, y_tensor

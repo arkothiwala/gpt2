@@ -1,3 +1,6 @@
+# Ignore MacOS system files
+.DS_Store
+
 # Python
 __pycache__/
 *.py[cod]
@@ -26,7 +29,7 @@ htmlcov/
 metric_logs/
 
 # Models / data
-models/
+*.bin
 tests/data/*
 !tests/data/.gitignore
 
