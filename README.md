@@ -10,17 +10,14 @@ I used a [single NVIDIA GB10](https://www.nvidia.com/en-in/products/workstations
 
 ### WandB experiment details
 - stable run link - https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/pvl5y7b8
-<div style="display: flex;">
-  <div style="flex: 33.33%; padding: 5px;">
-    <img src="assets/images/training/20260325_184232_train_loss.png" style="width:100%">
-  </div>
-  <div style="flex: 33.33%; padding: 5px;">
-    <img src="assets/images/training/20260325_184232_train_perplexity.png" style="width:100%">
-  </div>
-  <div style="flex: 33.33%; padding: 5px;">
-    <img src="assets/images/training/20260325_184232_train_gradient_norm.png" style="width:100%">
-  </div>
-</div>
+<table>
+  <tr>
+    <td width="33.33%"><img src="assets/images/training/20260325_184232_train_loss.png" alt="Train Loss"></td>
+    <td width="33.33%"><img src="assets/images/training/20260325_184232_train_perplexity.png" alt="Train Perplexity"></td>
+    <td width="33.33%"><img src="assets/images/training/20260325_184232_train_gradient_norm.png" alt="Train Gradient Norm"></td>
+  </tr>
+</table>
+
 
 - same domain [validation](ashutosh26/gpt2-from-scratch/kk0z25y8) perplexity was ~28 and [test](ashutosh26/gpt2-from-scratch/fakquee3) perplexity was in the range of 25-26
 - Out of domain validation set perplexity on [finewebedu](ashutosh26/gpt2-from-scratch/lesx5uzl) was ~43.
