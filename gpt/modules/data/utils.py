@@ -78,13 +78,13 @@ if __name__ == "__main__":
     split = "train"
     DataUtils.tokenize_data(
         # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
-        raw_data_folder=f"/Users/ashutosh/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/{split}",
-        output_binary_path=f"/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext_{split}.bin", 
+        raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/{split}/"),
+        output_binary_path=f"assets/processed_data/openwebtext_{split}.bin", 
         tokenizer=tokenizer
     )
     DataUtils.create_eot_index(
-        tokenized_binary_path=f"/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext_{split}.bin",
+        tokenized_binary_path=f"assets/processed_data/openwebtext_{split}.bin",
         binfile_obj_dtype=np.uint16,
         query_value=tokenizer.eot_token,
-        output_index_path=f"/Users/ashutosh/personal/study/gpt/assets/processed_data/openwebtext_{split}_eot_index.bin"
+        output_index_path=f"assets/processed_data/openwebtext_{split}_eot_index.bin"
     )

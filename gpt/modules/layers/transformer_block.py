@@ -24,6 +24,9 @@ class TransformerBlock(torch.nn.Module):
             ("dropout", torch.nn.Dropout(p=0.1)),
             ("linear_projection", torch.nn.Linear(in_features=4*d_model, out_features=d_model, bias=True))
         ]))
+        
+        self.dropout_residual_mha = torch.nn.Dropout(p=0.1)
+        self.dropout_residual_ffn = torch.nn.Dropout(p=0.1)
 
         # scale MHA parameters by scaling factor
         # This was introduced in GPT2 paper to stabilize deep layers
@@ -40,7 +43,7 @@ class TransformerBlock(torch.nn.Module):
 
         # PARTIAL MISTAKE - I didn't do torch.no_grad() here that would lead to scaling factor being applied during backpropagation as well which is not what we want. We just want to scale the initial weights and not the gradients during backpropagation.
         # WHY PARTIAL MISTAKE? - I was directly updating `weight.data.mul_(scaling_factor)` which is an in-place operation and it would have been fine as we are not tracking gradients for weight.data but I wanted to be extra cautious and use torch.no_grad() to ensure that we are not tracking gradients for these operations. Also, using torch.no_grad() makes it clear to anyone reading the code that we are intentionally not tracking gradients for these operations.
-        with torch.no_grad():
+        # with torch.no_grad():
             # scale only weights correctly
             # MISTAKE - Earlier I had scaled only in_proj_weight practically limiting the scenario where MHA is using separate q_proj_weight, k_proj_weight and v_proj_weight instead of combined in_proj_weight. This is because in some versions of PyTorch, MultiheadAttention uses separate projection weights for query, key and value instead of combined projection weight.
             # if self.MHA.in_proj_weight is not None:
@@ -56,8 +59,24 @@ class TransformerBlock(torch.nn.Module):
             # self.FFN.linear_projection.weight.data.mul_(scaling_factor)
             # MISTAKE - I misunderstood the scaling factor and was scaling all the weights -> we need to just scale the residual connection weights which are out projection layer from MHA and FFN.
 
-            self.MHA.out_proj.weight.mul_(scaling_factor)
-            self.FFN.linear_projection.weight.mul_(scaling_factor)
+            # self.MHA.out_proj.weight.mul_(scaling_factor)
+            # self.FFN.linear_projection.weight.mul_(scaling_factor)
+            
+            # # Added normal initialization for weights and zero initialization for biases as mentioned in GPT2 paper.
+            # torch.nn.init.normal_(self.FFN.linear_expansion.weight, mean=0.0, std=0.02)
+            # torch.nn.init.zeros_(self.FFN.linear_expansion.bias)
+            # if self.MHA.in_proj_weight is not None:
+            #     torch.nn.init.normal_(self.MHA.in_proj_weight, mean=0.0, std=0.02)
+            #     torch.nn.init.zeros_(self.MHA.in_proj_bias)
+            # if self.MHA.q_proj_weight is not None:
+            #     torch.nn.init.normal_(self.MHA.q_proj_weight, mean=0.0, std=0.02)
+            #     torch.nn.init.zeros_(self.MHA.q_proj_bias)
+            # if self.MHA.k_proj_weight is not None:
+            #     torch.nn.init.normal_(self.MHA.k_proj_weight, mean=0.0, std=0.02)
+            #     torch.nn.init.zeros_(self.MHA.k_proj_bias)
+            # if self.MHA.v_proj_weight is not None:
+            #     torch.nn.init.normal_(self.MHA.v_proj_weight, mean=0.0, std=0.02)
+            #     torch.nn.init.zeros_(self.MHA.v_proj_bias)
         
         self.layer_norm_mha = CustomLayerNorm(d_model=self.d_model)
         self.layer_norm_ffn = CustomLayerNorm(d_model=self.d_model)
@@ -79,13 +98,14 @@ class TransformerBlock(torch.nn.Module):
             value=x_layer_norm_mha, 
             # attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1, device=x.device).bool(), # not using is_causal=True because because using it along with need_weights=True is leading to silent or loud failures based on the pytorch version. Also, instead of float mask we are preparing boolean mask as it would consume much less memory, makes compute slightly faster and is recommended by PyTorch.
             attn_mask=self.causal_mask[:seq_len, :seq_len], # using pre-registered buffer for causal mask. This would be more efficient as we are not creating the mask in every forward pass and also it would be on the same device as the model.
-            need_weights=True,
-            key_padding_mask=None # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
+            need_weights=False,
+            key_padding_mask=None, # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
+            is_causal=True # using built-in causal mask support in PyTorch which is more efficient and also works well with need_weights=True. This would automatically apply the causal mask to the attention scores before softmax.
         )
-        x_post_mha = x + x_post_mha
+        x_post_mha = x + self.dropout_residual_mha(x_post_mha)
         
 
         x_layer_norm_ffn = self.layer_norm_ffn(x_post_mha)
-        x_post_ffn = x_post_mha + self.FFN(x_layer_norm_ffn)
+        x_post_ffn = x_post_mha + self.dropout_residual_ffn(self.FFN(x_layer_norm_ffn))
         return x_post_ffn
         

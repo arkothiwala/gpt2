@@ -43,3 +43,10 @@ tests/data/*
 
 # AWS
 .aws/
+
+# Model training
+model.log
+training_runs/
+*.ckpt
+nohup.out
+wandb/
