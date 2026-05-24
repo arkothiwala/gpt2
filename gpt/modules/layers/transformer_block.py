@@ -3,30 +3,40 @@ import collections
 import numpy as np
 from gpt.modules.embedding.sinusoidal import SinusoidalPositionalEmbeddings
 from gpt.modules.norm.layernorm import CustomLayerNorm
+from torch.nn import LayerNorm as TorchLayerNorm
+
+import logging
+logger = logging.getLogger(__name__)
 class TransformerBlock(torch.nn.Module):
 
-    def __init__(self, d_model, n_heads, context_length, attention_dropout=0.1, scaling_factor=1, *args, **kwargs):
+    def __init__(self, d_model, n_heads, context_length, attention_dropout=0.1, scaling_factor=1, logger=logger, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.d_model = d_model
         self.n_heads = n_heads
         self.context_length = context_length
+        self.logger = logger
+        self.layer_norm_mha = TorchLayerNorm(normalized_shape=self.d_model)
         self.MHA = torch.nn.MultiheadAttention(
             embed_dim=self.d_model, 
             num_heads=self.n_heads,
             dropout=attention_dropout,
             bias=True,
-            batch_first=True
+            batch_first=True,
+            # dtype=torch.bfloat16
         )
+        self.layer_norm_ffn = TorchLayerNorm(normalized_shape=self.d_model)
         self.FFN = torch.nn.Sequential(collections.OrderedDict([
             ("linear_expansion", torch.nn.Linear(in_features=d_model, out_features=4*d_model, bias=True)),
             # Mistake - I had initially forgotten the activation layer
-            ("activation", torch.nn.GELU()),
+            ("activation", torch.nn.GELU(approximate='tanh')),
             ("dropout", torch.nn.Dropout(p=0.1)),
             ("linear_projection", torch.nn.Linear(in_features=4*d_model, out_features=d_model, bias=True))
         ]))
         
         self.dropout_residual_mha = torch.nn.Dropout(p=0.1)
         self.dropout_residual_ffn = torch.nn.Dropout(p=0.1)
+        
+        # self.logger.info(f"self.MHA.in_proj_weight.dtype = {self.MHA.in_proj_weight.dtype} | self.MHA.out_proj.weight.dtype = {self.MHA.out_proj.weight.dtype} | self.FFN.linear_projection.weight.dtype = {self.FFN.linear_projection.weight.dtype}")
 
         # scale MHA parameters by scaling factor
         # This was introduced in GPT2 paper to stabilize deep layers
@@ -77,19 +87,18 @@ class TransformerBlock(torch.nn.Module):
             # if self.MHA.v_proj_weight is not None:
             #     torch.nn.init.normal_(self.MHA.v_proj_weight, mean=0.0, std=0.02)
             #     torch.nn.init.zeros_(self.MHA.v_proj_bias)
-        
-        self.layer_norm_mha = CustomLayerNorm(d_model=self.d_model)
-        self.layer_norm_ffn = CustomLayerNorm(d_model=self.d_model)
 
         self.register_buffer(
             "causal_mask",
-            torch.triu(torch.ones(self.context_length, self.context_length), diagonal=1).bool()
+            torch.triu(torch.ones(self.context_length, self.context_length)*float("-inf"), diagonal=1)
         )
 
 
     def forward(self, x):
         batch_size, seq_len, d_model = x.shape
         x_layer_norm_mha = self.layer_norm_mha(x)
+        # self.logger.debug(f"x.shape = {x.shape} | x.device = {x.device} | x.dtype = {x.dtype}")
+        # self.logger.debug(f"x_layer_norm_mha.shape = {x_layer_norm_mha.shape} | x_layer_norm_mha.device = {x_layer_norm_mha.device} | x_layer_norm_mha.dtype = {x_layer_norm_mha.dtype}")
         # MISTAKE - initially I had not provided separate query, key and values arguments. Also, I wasn't selecting first value
         # This was because in my custom implementation of MHA, I wasn't taking three inputs in MHA.
         x_post_mha, attention = self.MHA(
@@ -102,8 +111,9 @@ class TransformerBlock(torch.nn.Module):
             key_padding_mask=None, # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
             is_causal=True # using built-in causal mask support in PyTorch which is more efficient and also works well with need_weights=True. This would automatically apply the causal mask to the attention scores before softmax.
         )
+        # self.logger.debug(f"x_post_mha.dtype = {x_post_mha.dtype}")
         x_post_mha = x + self.dropout_residual_mha(x_post_mha)
-        
+        # self.logger.info(f"self.MHA.in_proj_weight.dtype = {self.MHA.in_proj_weight.dtype} | self.MHA.out_proj.weight.dtype = {self.MHA.out_proj.weight.dtype} | self.FFN.linear_projection.weight.dtype = {self.FFN.linear_projection.weight.dtype}")
 
         x_layer_norm_ffn = self.layer_norm_ffn(x_post_mha)
         x_post_ffn = x_post_mha + self.dropout_residual_ffn(self.FFN(x_layer_norm_ffn))

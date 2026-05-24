@@ -15,11 +15,11 @@ tokenizer:
   vocab_size: 50257
 
 optimizer:
-  type: adam
+  type: adamw
   lr: 0.0005
   weight_decay: 0.01
   beta1: 0.9
-  beta2: 0.999
+  beta2: 0.95
 
 scheduler:
   warmup_start_factor: 0.00001
@@ -35,13 +35,18 @@ training:
   valid_epoch_interval: 5
   test_epoch_interval: 5
   init_std: 0.02
-  dataloader_num_workers: 8
-  checkpoint_interval: 10
-  max_grad_norm: 3
+  dataloader_num_workers: 2
+  checkpoint_interval: 100
+  max_grad_norm: 1
 
 # all configs for dataset and dataloader
 data:
   train_bin_file_path: assets/processed_data/openwebtext_train.bin
-  valid_bin_file_path: assets/processed_data/openwebtext_valid.bin
+  valid_bin_file_path: assets/processed_data/openwebtext_val.bin
   test_bin_file_path: assets/processed_data/openwebtext_test.bin
   prefetch_factor: 2
+
+lr_finder:
+  start_lr: 1e-6
+  end_lr: 1
+  num_steps: 400
