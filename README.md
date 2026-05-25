@@ -5,7 +5,7 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
 
 ### Training Summary
 
-| Metric                          | Value                   |
+| Key                          | Value                   |
 |---------------------------------|-------------------------|
 | Parameters                      | 124M                    |
 | Layers                          | 12                      |
@@ -15,8 +15,8 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
 | Hardware                        | [NVIDIA DGX Spark - GB10](https://www.nvidia.com/en-in/products/workstations/dgx-spark/) |
 | Global Batch Size               | 512                     |
 | Avg. Training Throughput        | 31000 tokens/sec        |
-| Final Val Loss                  | 3.3                     |
-| Final Perplexity                | 27                      |
+| Validation Loss                  | 3.3                     |
+| Validation Perplexity     | 28                      |
 | Training Time                   | 60 Hours                |
 | Precision                       | BF16                    |
 | MFU - Model FLOPs Utilization   | 38%                     |
@@ -43,8 +43,8 @@ These optimizations improved training time from expected 280 Hours to 60 Hours.
 </table>
 
 
-- same domain [validation](ashutosh26/gpt2-from-scratch/kk0z25y8) perplexity was ~28 and [test](ashutosh26/gpt2-from-scratch/fakquee3) perplexity was in the range of 25-26
-- Out of domain validation set perplexity on [finewebedu](ashutosh26/gpt2-from-scratch/lesx5uzl) was ~43.
+- same domain [validation](https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/kk0z25y8) perplexity was ~28 and [test](https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/fakquee3) perplexity was in the range of 25-26
+- Perplexity of 43 on an out of [domain validation set]((https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/lesx5uzl)) with [finewebedu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) dataset.
 
 
 ### LLM Training Learnings
