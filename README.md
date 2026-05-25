@@ -3,10 +3,34 @@
 ### Description
 To learn LLM pre-training, I attempted to implement GPT2 from scratch by referring only to the GPT1 and GPT2 papers. This work deliberately avoided implementation videos, blogs and tutorials to expose the kind of mistakes, hidden assumptions, naive ablation and training stability issues that only surface while translating research papers into a working code.
 
-<br>
+### Training Summary
 
-### Setup
-I used a [single NVIDIA GB10](https://www.nvidia.com/en-in/products/workstations/dgx-spark/) DGX spark for model training on openwebtext dataset with train val test split of 60:10:10.
+| Metric                          | Value                   |
+|---------------------------------|-------------------------|
+| Parameters                      | 124M                    |
+| Layers                          | 12                      |
+| Context Length                  | 1024                    |
+| Dataset                         | [openwebtext dataset](https://huggingface.co/datasets/Skylion007/openwebtext) |
+| Trained Tokens                  | 6.7B                    |
+| Hardware                        | [NVIDIA DGX Spark - GB10](https://www.nvidia.com/en-in/products/workstations/dgx-spark/) |
+| Global Batch Size               | 512                     |
+| Avg. Training Throughput        | 31000 tokens/sec        |
+| Final Val Loss                  | 3.3                     |
+| Final Perplexity                | 27                      |
+| Training Time                   | 60 Hours                |
+| Precision                       | BF16                    |
+| MFU - Model FLOPs Utilization   | 38%                     |
+
+- Theoretical max for dense tensor in BF16 is `62 TFLOPs` for GB10 chip
+
+### Performance Optimizations
+
+These optimizations improved training time from expected 280 Hours to 60 Hours.
+- FlashAttention / SDPA kernels
+- `is_causal=True`
+- `torch.compile()`
+- `torch.set_float32_matmul_precision('high')`
+- Disabled attention weight materialization
 
 ### WandB experiment details
 - stable run link - https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/pvl5y7b8
