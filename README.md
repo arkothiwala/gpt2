@@ -15,7 +15,7 @@ To learn LLM pre-training, I attempted to implement GPT2 from scratch by referri
 | Hardware                        | [NVIDIA DGX Spark - GB10](https://www.nvidia.com/en-in/products/workstations/dgx-spark/) |
 | Global Batch Size               | 512                     |
 | Avg. Training Throughput        | 31000 tokens/sec        |
-| Validation Loss                  | 3.3                     |
+| Validation Loss                  | 3.33                     |
 | Validation Perplexity     | 28                      |
 | Training Time                   | 60 Hours                |
 | Precision                       | BF16                    |
