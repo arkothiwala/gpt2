@@ -29,14 +29,14 @@ scheduler:
 
 # all configs for training loop
 training:
-  global_batch_size: 512
-  micro_batch_size: 16
+  global_batch_size: 4
+  micro_batch_size: 2
   epochs: 100
   valid_epoch_interval: 5
   test_epoch_interval: 5
   init_std: 0.02
   dataloader_num_workers: 2
-  checkpoint_interval: 100
+  checkpoint_interval: 1
   max_grad_norm: 1
   validation_interval: 50
 
@@ -46,7 +46,7 @@ validation:
 
 # all configs for dataset and dataloader
 data:
-  train_bin_file_path: assets/processed_data/openwebtext_train.bin
+  train_bin_file_path: assets/processed_data/openwebtext_val.bin
   valid_bin_file_path: assets/processed_data/openwebtext_val.bin
   test_bin_file_path: assets/processed_data/openwebtext_test.bin
   prefetch_factor: 2
@@ -55,3 +55,6 @@ lr_finder:
   start_lr: 1e-6
   end_lr: 1
   num_steps: 400  
+
+checkpoint:
+  path: assets/models/20260325_184232/checkpoint_12900.pt
