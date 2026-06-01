@@ -46,11 +46,37 @@ These optimizations improved training time from expected 280 Hours to 60 Hours.
 - same domain [validation](https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/kk0z25y8) perplexity was ~28 and [test](https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/fakquee3) perplexity was in the range of 25-26
 - Perplexity of 43 on an out of [domain validation set]((https://wandb.ai/ashutosh26/gpt2-from-scratch/runs/lesx5uzl)) with [finewebedu](https://huggingface.co/datasets/HuggingFaceFW/fineweb-edu) dataset.
 
+### Training Diagnostics
+1. Gradient Norms are leading indicator of training getting into unstable territory
+    ![image](assets/images/training/20260320_222529_loss_plateau_grad_norms.png)
+    - While Gradient norms started becoming unstable after 175 step, the loss looks healthy as it keeps going down w/o much any evident spikes.
+    - Loss starts showing early evidence of instability/warning with loss slightly rising around 375 step before it plateaus.
+2.  <details><summary>TODO - Explain the oscallations in the gradient norm</summary></details>
+
+<!-- 3. <details><summary>Early, mid and late training dynamics</summary>
+    - MHA | Out weights
+        - During first 100 steps, MHA blocks at layer 5,6,7 shows the least gradient among all layers. However, it is still not next to zero. While they are below in ranking, they aren't abyssmal. Even layers 10 and 11 had fairly avg gradients till 500 steps then it went to being least
+            - from steps 1 to 10 the gradients are flipping, and after step 11 to 30, L10 and L11 are at top. After step 30, L0 start a steep rise.
+        - 100 to 1k - L5, L6 is making it way up from least gradients to second highest gradients
+            - After 200 steps, L3 to L7 started going up with steep rise from L3 and moderate rise for L7
+        - 1k_10k is showing sharp dip in gradients for L2, L3
+    - MHA QKV in-proj weights
+        - L6 ans L7 are making its way from bottom to top in the mid journey
+        - After 1.5k training steps, L0,L1, L2 layers have one of the least gradients
+    - FFN proj weights
+        - Mostly seen high grads for lower layer and lower grads for higher layers throughout the training. Only that L3 and later L4 got higher grads. Rest of the layers followed the L1 to L11 order.
+    - FFN Expansion had
+        - upto 100 steps order was L1 to L11
+        - later L6 started rising
+        - In the late training L6 had the highest gradients
+    </details> -->
+
+
 
 ### LLM Training Learnings
-1. Read paper carefully - My loss was pleateauing at ~7 was because of very high regularization.
+1. Read paper carefully - As shown in the plot above, the loss was pleateauing at ~7 due to high regularization.
 
-    ![image](assets/images/training/20260320_222529_loss_plateau_grad_norms.png)
+    <!-- ![image](assets/images/training/20260320_222529_loss_plateau_grad_norms.png) -->
     - [GPT2 paper](https://cdn.openai.com/better-language-models/language_models_are_unsupervised_multitask_learners.pdf) didn't mention which optimizer was used to train GPT2. It was mentioned the GPT2 model follows most of the details from original GPT paper.
     - [GPT1 paper](https://cdn.openai.com/research-covers/language-unsupervised/language_understanding_paper.pdf) mentioned that the model was trained using `Adam optimizer`. 
         ```
@@ -62,7 +88,7 @@ These optimizations improved training time from expected 280 Hours to 60 Hours.
         We also employed a modified version of L2 regularization proposed in [37], with w= 0.01 on all non bias or gain weights.
         ```
     - So, I used Adam optimizer with `weight_decay = 0.01`
-    - MISTAKE - I didn't check the paper at reference [37]. It referred to `AdamW paper`.
+    - MISTAKE - I didn't check the paper at reference [37]. It referred to `AdamW paper`. Also, it didn't occur that weight_decay of 0.01 will be too high for Adam.
     - The moment, I changed to AdamW optimizer. The model training improved from pleateau at 7 to achieving 3.2 loss on validation set with perplexity of ~26-27 on the validation set.
 
 2. You need to observe right things[metrics, data, plots] as much as possible
