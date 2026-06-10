@@ -19,6 +19,7 @@ import logging
 import math
 import random
 torch.set_float32_matmul_precision('high')
+# torch._logging.set_logs(graph_code=True)
 
 # Remove basicConfig to avoid conflict with custom handlers
 # logging.basicConfig(level=logging.DEBUG)
@@ -390,6 +391,10 @@ if __name__ == '__main__':
     model.train()
     # model.compile() if torch.cuda.is_available() else model
     model = torch.compile(model) if torch.cuda.is_available() else model
+    # with torch.no_grad():
+    #   out = model(input_ids)     # compilation is triggered on first run
+    #   logger.debug("torch._dynamo.utils.compile_times()")
+    #   logger.debug(torch._dynamo.utils.compile_times())
     grad_scaler = GradScaler() if torch.cuda.is_available() else None
     # run_lr_finder(
     #     model=model, 
