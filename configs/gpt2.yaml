@@ -30,7 +30,7 @@ scheduler:
 # all configs for training loop
 training:
   global_batch_size: 512
-  micro_batch_size: 16
+  micro_batch_size: 4
   epochs: 100
   valid_epoch_interval: 5
   test_epoch_interval: 5
@@ -42,13 +42,13 @@ training:
 
 validation:
   global_batch_size: 1024
-  micro_batch_size: 16
+  micro_batch_size: 1
 
 # all configs for dataset and dataloader
 data:
-  train_bin_file_path: assets/processed_data/openwebtext_train.bin
-  valid_bin_file_path: assets/processed_data/openwebtext_val.bin
-  test_bin_file_path: assets/processed_data/openwebtext_test.bin
+  train_bin_file_path: /teamspace/uploads/val.bin
+  valid_bin_file_path: /teamspace/uploads/val.bin
+  test_bin_file_path: /teamspace/uploads/val.bin
   prefetch_factor: 2
 
 lr_finder:

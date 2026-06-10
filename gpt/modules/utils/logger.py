@@ -13,7 +13,7 @@ class CustomLogger:
         c_handler = logging.StreamHandler()
         f_handler = logging.FileHandler(log_file_path)
 
-        c_handler.setLevel(logging.INFO)
+        c_handler.setLevel(logging.DEBUG)
         f_handler.setLevel(logging.DEBUG)
 
         # Create formatters and add it to handlers

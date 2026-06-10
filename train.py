@@ -243,17 +243,17 @@ if __name__ == '__main__':
         shuffle=True,
         # sampler: Sampler | Iterable | None = None,
         # batch_sampler: Sampler[Sequence] | Iterable[Sequence] | None = None,
-        # num_workers=exp_config.get("training").get("dataloader_num_workers"),
-        # collate_fn = None,
-        # pin_memory = True if torch.cuda.is_available() else False,
+        num_workers=exp_config.get("training").get("dataloader_num_workers"),
+        collate_fn = None,
+        pin_memory = True if torch.cuda.is_available() else False,
         drop_last = True,
         # timeout = 0,
-        # worker_init_fn = DataUtils.worker_init_fn,
+        worker_init_fn = DataUtils.worker_init_fn,
         # multiprocessing_context = None,
         # generator = None,
-        # prefetch_factor = exp_config.get("data").get("prefetch_factor"),
+        prefetch_factor = exp_config.get("data").get("prefetch_factor"),
         # persistent_workers = True,
-        # pin_memory_device = "cuda" if torch.cuda.is_available() else ''
+        pin_memory_device = "cuda" if torch.cuda.is_available() else ''
     )
 
     valid_dl = DataLoader(
@@ -386,7 +386,7 @@ if __name__ == '__main__':
     # for epoch in tqdm(range(exp_config.get("training").get("epochs")), desc="epoch progress"):
     # set model in the training model
     model.train()
-    model.compile() if torch.cuda.is_available() else model
+    # model.compile() if torch.cuda.is_available() else model
     grad_scaler = GradScaler() if torch.cuda.is_available() else None
     # run_lr_finder(
     #     model=model, 
@@ -433,6 +433,7 @@ if __name__ == '__main__':
         batch_y_train = batch_y_train.to(device=device) if torch.cuda.is_available() else batch_y_train
         
         logger.debug(f"batch_x_train.dtype = {batch_x_train.dtype} | batch_y_train.dtype = {batch_y_train.dtype}")
+        logger.debug(f"batch_x_train.shape = {batch_x_train.shape} | batch_y_train.shape = {batch_y_train.shape}")
 
         # print(f"batch_x_train.max() = {batch_x_train.max().max()}")
         
@@ -443,7 +444,7 @@ if __name__ == '__main__':
         # forward pass
             
         if autocast_dtype in [torch.float16, torch.bfloat16]:
-            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            with sdpa_kernel(backends=[SDPBackend.MATH]):
                 with autocast(device_type=device.type, dtype=autocast_dtype):
                     batch_logits = model(batch_x_train)
                     micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
