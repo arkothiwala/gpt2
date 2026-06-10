@@ -153,6 +153,8 @@ if __name__ == '__main__':
         autocast_dtype = torch.float16
     else:
         autocast_dtype = None
+    autocast_dtype = torch.float16
+    print(f"autocast_dtype = {autocast_dtype}")
     
     #########################################################################
     ############################ load checkpoint ############################
@@ -311,7 +313,7 @@ if __name__ == '__main__':
         # PROFILER to check and confirm if flash attention is being used or not.
         from torch.profiler import profile, ProfilerActivity
 
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
+        with torch.amp.autocast('cuda', dtype=autocast_dtype):
             with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
                 output = model(input_ids)
 
@@ -387,6 +389,7 @@ if __name__ == '__main__':
     # set model in the training model
     model.train()
     # model.compile() if torch.cuda.is_available() else model
+    model = torch.compile(model) if torch.cuda.is_available() else model
     grad_scaler = GradScaler() if torch.cuda.is_available() else None
     # run_lr_finder(
     #     model=model, 
@@ -422,6 +425,21 @@ if __name__ == '__main__':
         logger.info(f"Advancing dataloader to batch index {batch_idx_start} to resume training")
         for _ in tqdm(range(batch_idx_start), desc="Advancing dataloader progress"):
             next(train_iter)
+
+    import torch
+
+    # Print the data type of each parameter group
+    for name, param in model.named_parameters():
+        print(f"Layer: {name} | Dtype: {param.dtype}")
+
+    # Quick assertion test to check if ALL parameters are BF16
+    # is_pure_bf16 = all(p.dtype == torch.bfloat16 for p in model.parameters())
+    from collections import Counter
+    model_param_dtypes = [p.dtype for p in model.parameters()]
+    model_param_dtypes_distribution = Counter(model_param_dtypes)
+    
+    print(f"model_param_dtypes_distribution: {model_param_dtypes_distribution}")
+
     for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_iter, desc="epoch's batch progress"), start=batch_idx_start):
         batch_size = batch_x_train.shape[0]
         total_accumulated += batch_size
