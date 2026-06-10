@@ -32,6 +32,7 @@ class GPT2Model(torch.nn.Module):
         # self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
         # self.embedding_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         self.transformer_layers = torch.nn.Sequential()
+        # self.transformer_layers = torch.nn.ModuleList()
         self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         # add sequential layers
         for layer in range(self.n_layers):
@@ -136,6 +137,7 @@ class GPT2Model(torch.nn.Module):
         # x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1) # MISTAKE - I had initially used functional dropout here w/o train v/s inference mode check. Moving it to Dropout module which internally manages train v/s inference mode and also makes code cleaner.
         x_embeddings = self.dropout(x_embeddings)
         x_logits = self.transformer_layers(x_embeddings)
+        # x_logits = torch.utils.checkpoint.checkpoint(self.transformer_layers, x_embeddings, use_reentrant=False)
         # self.logger.debug(f"z.shape = {x_logits.shape} | z.device = {x_logits.device} | z.dtype = {x_logits.dtype}")
         x_logits = x_logits@self.embedding.weight.T
         # self.logger.debug(f"x_logits.shape = {x_logits.shape} | x_logits.device = {x_logits.device} | x_logits.dtype = {x_logits.dtype}")
