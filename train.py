@@ -18,6 +18,7 @@ from datetime import datetime
 import logging
 import math
 import random
+import gc
 torch.set_float32_matmul_precision('high')
 # torch._logging.set_logs(graph_code=True)
 
@@ -26,6 +27,28 @@ torch.set_float32_matmul_precision('high')
 
 # Specific override for a noisy library
 logging.getLogger('multiprocessing').setLevel(logging.INFO)
+
+def log_gpu_memory(logger, tag: str, device=None):
+    """Log GPU memory at any point in training."""
+    if not torch.cuda.is_available():
+        return
+    
+    device = device or torch.cuda.current_device()
+    
+    allocated   = torch.cuda.memory_allocated(device) / 1024**3      # actively used
+    reserved    = torch.cuda.memory_reserved(device) / 1024**3       # held by allocator (includes fragmentation)
+    max_alloc   = torch.cuda.max_memory_allocated(device) / 1024**3  # peak since last reset
+    free, total = torch.cuda.mem_get_info(device)
+    free        = free / 1024**3
+    total       = total / 1024**3
+    
+    logger.info(
+        f"[VRAM | {tag}] "
+        f"alloc={allocated:.2f}GB | "
+        f"reserved={reserved:.2f}GB | "
+        f"peak={max_alloc:.2f}GB | "
+        f"free={free:.2f}GB / {total:.2f}GB"
+    )
 
 def validate_experiment_config(config):
     global_batch_size = config.get("training").get("global_batch_size")
@@ -207,7 +230,10 @@ if __name__ == '__main__':
             context_length=exp_config.get("model").get("context_length"),
             logger=logger
         )
+
+    log_gpu_memory(logger, "before model.to(device)")
     model.to(device)
+    log_gpu_memory(logger, "after model.to(device)")
     logger.info("loaded total {} parameters".format(sum(p.numel() for p in model.parameters())))
     logger.debug(model.parameters)
     logger.debug(f"Model parameters device: {next(model.parameters()).device}")
@@ -308,6 +334,7 @@ if __name__ == '__main__':
     batch[1] = batch[1].to(device)
 
     with torch.no_grad():
+        log_gpu_memory(logger, "before profiling")
         input_ids = torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)
         logger.debug(model(x=input_ids).shape)
         
@@ -317,12 +344,14 @@ if __name__ == '__main__':
         with torch.amp.autocast('cuda', dtype=autocast_dtype):
             with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
                 output = model(input_ids)
+        log_gpu_memory(logger, "after profiling")
 
         # Look for flash attention kernels
         logger.info("checking profiler events for attention kernels")
         for event in prof.key_averages():
             if "attention" in event.key.lower() or "flash" in event.key.lower() or "sdpa" in event.key.lower():
                 logger.info(event.__dict__)#.key, event.cuda_time_total)
+      
 
     ########################################################################
     #################### Optim + LR Scheduler Config #######################
@@ -330,6 +359,7 @@ if __name__ == '__main__':
 
 
     if exp_config.get("optimizer").get("type") == "adamw":
+        log_gpu_memory(logger, "before optimizer")
         optimizer = torch.optim.AdamW(
             params=model.parameters(),
             lr = exp_config.get("optimizer").get("lr"),
@@ -339,10 +369,12 @@ if __name__ == '__main__':
                 exp_config.get("optimizer").get("beta2")
             ),
         )
+        log_gpu_memory(logger, "after optimizer")
 
     total_optimizer_steps = len(train_ds) // exp_config.get("training").get("global_batch_size")
     logger.info(f"Total optimizer steps per epoch: {total_optimizer_steps}")
     cosine_ann_steps = total_optimizer_steps - exp_config.get("scheduler").get("warmup_steps")
+    log_gpu_memory(logger, "before LR schedular")
     lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
         optimizer=optimizer,
         schedulers=[
@@ -359,6 +391,7 @@ if __name__ == '__main__':
         ],
         milestones=[exp_config.get("scheduler").get("warmup_steps")],
     )
+    log_gpu_memory(logger, "after LR schedular")
 
     if args.checkpoint_path is not None:
         if checkpoint.get('scheduler_state_dict', None) is not None:
@@ -390,11 +423,17 @@ if __name__ == '__main__':
     # set model in the training model
     model.train()
     # model.compile() if torch.cuda.is_available() else model
+    log_gpu_memory(logger, "before torch.compile")
     model = torch.compile(model) if torch.cuda.is_available() else model
-    # with torch.no_grad():
-    #   out = model(input_ids)     # compilation is triggered on first run
-    #   logger.debug("torch._dynamo.utils.compile_times()")
-    #   logger.debug(torch._dynamo.utils.compile_times())
+    with torch.no_grad():
+      out = model(input_ids)     # compilation is triggered on first run
+      # logger.debug("torch._dynamo.utils.compile_times()")
+      # logger.debug(torch._dynamo.utils.compile_times())
+      log_gpu_memory(logger, "after torch.compile")
+      del input_ids, out
+      gc.collect()
+      torch.cuda.empty_cache()
+    log_gpu_memory(logger, "after torch.compile and deletion")
     grad_scaler = GradScaler() if torch.cuda.is_available() else None
     # run_lr_finder(
     #     model=model, 
@@ -444,7 +483,7 @@ if __name__ == '__main__':
     model_param_dtypes_distribution = Counter(model_param_dtypes)
     
     print(f"model_param_dtypes_distribution: {model_param_dtypes_distribution}")
-
+    log_gpu_memory(logger, "before starting training loop")
     for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_iter, desc="epoch's batch progress"), start=batch_idx_start):
         batch_size = batch_x_train.shape[0]
         total_accumulated += batch_size
@@ -469,16 +508,20 @@ if __name__ == '__main__':
         if autocast_dtype in [torch.float16, torch.bfloat16]:
             with sdpa_kernel(backends=[SDPBackend.MATH]):
                 with autocast(device_type=device.type, dtype=autocast_dtype):
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass with autocast")
                     batch_logits = model(batch_x_train)
                     micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
                     micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass with autocast")
         else:
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass without autocast")
             batch_logits = model(batch_x_train)
             # micro_batch_loss = cross_entropy_loss(input=batch_logits.permute(0,2,1).contiguous(), target=batch_y_train)
             # batch_logits = batch_logits.to(device='cpu') if not torch.cuda.is_available() else batch_logits
             # batch_y_train = batch_y_train.to(device='cpu')
             micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
             micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass without autocast")
             
         if autocast_dtype == torch.float16:
             micro_batch_loss_scaled = grad_scaler.scale(micro_batch_loss_scaled)
@@ -492,6 +535,11 @@ if __name__ == '__main__':
         global_logits_max += batch_logits.max(dim=-1).values.mean().item()
         global_logits_min += batch_logits.min(dim=-1).values.mean().item()
         global_logits_mean += batch_logits.mean(dim=-1).mean().item()
+        log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and before batch logits del")
+        del batch_logits
+        gc.collect()
+        torch.cuda.empty_cache()
+        log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and batch logits del")
         
 
         # handle gradient accumulation
@@ -508,25 +556,25 @@ if __name__ == '__main__':
                 perplexity = math.exp(global_batch_loss)
             except OverflowError:
                 perplexity = float('inf')
-            unclipped_grad_norm_early = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
-            unclipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
-            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} | unclipped_grad_norm = {unclipped_grad_norm}")
+            # unclipped_grad_norm_early = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
+            # unclipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
+            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} ")#| unclipped_grad_norm = {unclipped_grad_norm}")
             
-            paramwise_grad_stats = get_parameterwise_grad_stats(model)
-            paramwise_total_grad_norm = torch.linalg.vector_norm(torch.tensor(list(paramwise_grad_stats.values())), ord=2)
+            # paramwise_grad_stats = get_parameterwise_grad_stats(model)
+            # paramwise_total_grad_norm = torch.linalg.vector_norm(torch.tensor(list(paramwise_grad_stats.values())), ord=2)
             
             wandb.log({
                 "train/loss": global_batch_loss.item() if isinstance(global_batch_loss, torch.Tensor) else global_batch_loss,
                 "train/perplexity": perplexity,
                 "train/learning_rate": optimizer.param_groups[0]['lr'],
-                "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
+                # "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
                 "train/step": global_step,
                 "train/logits_variance": global_logits_variance,
                 "train/logits_max": global_logits_max,
                 "train/logits_min": global_logits_min,
                 "train/logits_mean": global_logits_mean,
-                **paramwise_grad_stats,
-                "train/derived_grad_norm": paramwise_total_grad_norm.item() if isinstance(paramwise_total_grad_norm, torch.Tensor) else paramwise_total_grad_norm
+                # **paramwise_grad_stats,
+                # "train/derived_grad_norm": paramwise_total_grad_norm.item() if isinstance(paramwise_total_grad_norm, torch.Tensor) else paramwise_total_grad_norm
 
             })
             
@@ -541,12 +589,14 @@ if __name__ == '__main__':
             torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=exp_config.get("training").get("max_grad_norm"), error_if_nonfinite=False)
             
             # take optimizer step and update the lr scheduler
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | before optimizer step")
             if autocast_dtype == torch.float16:
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
                 optimizer.step()
             lr_scheduler.step()
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | after optimizer step")
             optimizer.zero_grad(set_to_none=True)
 
             global_step += 1
