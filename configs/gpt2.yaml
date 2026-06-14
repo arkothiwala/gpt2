@@ -30,7 +30,7 @@ scheduler:
 # all configs for training loop
 training:
   global_batch_size: 512
-  micro_batch_size: 4
+  micro_batch_size: 1
   epochs: 100
   valid_epoch_interval: 5
   test_epoch_interval: 5
@@ -46,9 +46,9 @@ validation:
 
 # all configs for dataset and dataloader
 data:
-  train_bin_file_path: /teamspace/uploads/val.bin
-  valid_bin_file_path: /teamspace/uploads/val.bin
-  test_bin_file_path: /teamspace/uploads/val.bin
+  train_bin_file_path: /content/gpt2/assets/processed_data/openwebtext/train.bin
+  valid_bin_file_path: /content/gpt2/assets/processed_data/openwebtext/val.bin
+  test_bin_file_path: /content/gpt2/assets/processed_data/openwebtext/test.bin
   prefetch_factor: 2
 
 lr_finder:
