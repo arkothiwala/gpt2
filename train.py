@@ -344,6 +344,9 @@ if __name__ == '__main__':
         with torch.amp.autocast('cuda', dtype=autocast_dtype):
             with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
                 output = model(input_ids)
+        del output
+        gc.collect()
+        torch.cuda.empty_cache()
         log_gpu_memory(logger, "after profiling")
 
         # Look for flash attention kernels
@@ -510,9 +513,11 @@ if __name__ == '__main__':
                 with autocast(device_type=device.type, dtype=autocast_dtype):
                     log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass with autocast")
                     batch_logits = model(batch_x_train)
-                    micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
-                    micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
                     log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass with autocast")
+                    micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss calculation")
+                    micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss_scaled calculation")
         else:
             log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass without autocast")
             batch_logits = model(batch_x_train)
