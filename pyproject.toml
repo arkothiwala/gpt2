@@ -6,6 +6,7 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.135.2",
+    "gradio>=6.16.0",
     "huggingface-hub>=1.7.2",
     "pandas>=3.0.1",
     "pyarrow>=23.0.1",
@@ -14,6 +15,7 @@ dependencies = [
     "torch>=2.9.1",
     "torchvision>=0.25.0",
     "tqdm>=4.67.3",
+    "transformers>=5.9.0",
     "uvicorn>=0.42.0",
     "wandb>=0.25.1",
 ]
