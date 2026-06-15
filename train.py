@@ -147,6 +147,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_yaml", help="configs/<exp_config>.yaml file path")
     parser.add_argument("--checkpoint_path", default=None, help="checkpoint path to resume training from")
+    parser.add_argument("--profile", default=False, help="whether to run profiler or not")
+    parser.add_argument("--profile_steps", default=10, type=int, help="number of stpes to run during profiling")
     args = parser.parse_args()
 
     # Experiment config and logger
@@ -519,6 +521,26 @@ if __name__ == '__main__':
     
     print(f"model_param_dtypes_distribution: {model_param_dtypes_distribution}")
     log_gpu_memory(logger, "before starting training loop")
+
+    if args.profile:
+      profiler_schedule = torch.profiler.schedule(
+        wait=2,     # skip first 2 steps (warmup noise)
+        warmup=2,   # warmup profiler for 2 steps
+        active=3,   # capture 3 steps
+        repeat=1
+      )
+
+      profiler = torch.profiler.profile(
+          activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+          schedule=torch.profiler.schedule(wait=2, warmup=2, active=3),
+          on_trace_ready=torch.profiler.tensorboard_trace_handler(f"{exp_dir}/profiler"),
+          record_shapes=True,
+          profile_memory=True,
+          with_stack=True,
+          with_flops=True,
+      )
+      profiler.start()
+
     for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_iter, desc="epoch's batch progress"), start=batch_idx_start):
         batch_size = batch_x_train.shape[0]
         total_accumulated += batch_size
@@ -577,6 +599,16 @@ if __name__ == '__main__':
         gc.collect()
         torch.cuda.empty_cache()
         log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and batch logits del")
+
+        if args.profile:
+          profiler.step()
+          if batch_idx >= args.profile_steps:
+              profiler.stop()
+              # profiler.export_chrome_trace(f"{exp_dir}/profiler/trace.json")
+              print(profiler.key_averages().table(sort_by="cuda_time_total", row_limit=50))
+              with open(f"{exp_dir}/profiler/trace.txt", "w") as f:
+                f.write(prof.key_averages().table(sort_by="cuda_time_total", row_limit=150000, max_name_column_width=200))
+              break
         
 
         # handle gradient accumulation
