@@ -171,7 +171,7 @@ if __name__ == '__main__':
     for logger_name in ["torch", "torch._dynamo", "torch._functorch", "torch._inductor"]:
         torch_logger = logging.getLogger(logger_name)
         torch_logger.addHandler(torch_logs_file_handler)
-        torch_logger.propagate = False  # Stops logs from leaking into your main console output
+        torch_logger.propagate = True  # Stops logs from leaking into your main console output
 
     # 3. Define what specific graph elements you want to log
     torch._logging.set_logs(
@@ -187,8 +187,8 @@ if __name__ == '__main__':
     x = torch.randn(3, 3)
     foo(x)
     print("testing torch.compile")
-    torch_logs_file_handler.flush()
-    torch_logs_file_handler.close()
+    # torch_logs_file_handler.flush()
+    # torch_logs_file_handler.close()
     # raise NotImplementedError
     
     #########################################################################
