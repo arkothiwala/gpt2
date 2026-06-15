@@ -157,7 +157,39 @@ if __name__ == '__main__':
     checkpoint_dir = os.path.join(exp_dir, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
     logger = CustomLogger.get_logger(base_dir=exp_dir)
+
+    import torch._logging
+    torch._dynamo.reset()
+
+    # 1. Setup a file handler for the specific file
+    torch_logs_file_handler = logging.FileHandler(f"{exp_dir}/pytorch_compiler.log", mode="w")
+    torch_logs_file_handler.setLevel(logging.DEBUG)
+    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    torch_logs_file_handler.setFormatter(formatter)
+
+    # 2. Attach the file handler to the core PyTorch compiler loggers
+    for logger_name in ["torch", "torch._dynamo", "torch._functorch", "torch._inductor"]:
+        torch_logger = logging.getLogger(logger_name)
+        torch_logger.addHandler(torch_logs_file_handler)
+        torch_logger.propagate = False  # Stops logs from leaking into your main console output
+
+    # 3. Define what specific graph elements you want to log
+    torch._logging.set_logs(
+        aot_graphs=True,       # Captures forward/backward graphs
+        graph_breaks=True      # Captures where the graph splits
+    )
+
+    # Test the setup
+    @torch.compile
+    def foo(x):
+        return torch.sin(x) + 1
     
+    x = torch.randn(3, 3)
+    foo(x)
+    print("testing torch.compile")
+    torch_logs_file_handler.flush()
+    torch_logs_file_handler.close()
+    # raise NotImplementedError
     
     #########################################################################
     ############################## Load Config ##############################
