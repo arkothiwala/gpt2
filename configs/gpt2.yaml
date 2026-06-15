@@ -46,9 +46,9 @@ validation:
 
 # all configs for dataset and dataloader
 data:
-  train_bin_file_path: /content/gpt2/assets/processed_data/openwebtext/train.bin
-  valid_bin_file_path: /content/gpt2/assets/processed_data/openwebtext/val.bin
-  test_bin_file_path: /content/gpt2/assets/processed_data/openwebtext/test.bin
+  train_bin_file_path: assets/processed_data/openwebtext/openwebtext_train.bin
+  valid_bin_file_path: assets/processed_data/openwebtext/openwebtext_val.bin
+  test_bin_file_path: assets/processed_data/openwebtext/openwebtext_test.bin
   prefetch_factor: 2
 
 lr_finder:
