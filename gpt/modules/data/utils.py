@@ -75,12 +75,74 @@ class DataUtils:
         np.random.seed(seed)
         random.seed(seed)
 
+    @staticmethod
+    def split_binary_file(input_path, val_size_mb=500, test_size_mb=500, bytes_per_token=2):
+    # Calculate exact split sizes in bytes (must be a multiple of token size)
+        val_size_bytes = (val_size_mb * 1024 * 1024) // bytes_per_token * bytes_per_token
+        test_size_bytes = (test_size_mb * 1024 * 1024) // bytes_per_token * bytes_per_token
+    
+        total_bytes = os.path.getsize(input_path)
+        train_size_bytes = total_bytes - val_size_bytes - test_size_bytes
+        
+        print(f"Total file size: {total_bytes / (1024**3):.2f} GB")
+        print(f"Train size: {train_size_bytes / (1024**2):.2f} MB")
+        print(f"Val size: {val_size_bytes / (1024**2):.2f} MB")
+        print(f"Test size: {test_size_bytes / (1024**2):.2f} MB")
+
+        base_dir = os.path.dirname(input_path)
+        
+        # Define output paths
+        train_path = os.path.join(base_dir, "train.bin")
+        val_path = os.path.join(base_dir, "val.bin")
+        test_path = os.path.join(base_dir, "test.bin")
+        
+        chunk_size = 64 * 1024 * 1024 # 64MB buffer chunk
+        
+        with open(input_path, 'rb') as f_in:
+            # 1. Write Train Data
+            print("Writing train.bin...")
+            bytes_written = 0
+            with open(train_path, 'wb') as f_out:
+                while bytes_written < train_size_bytes:
+                    to_read = min(chunk_size, train_size_bytes - bytes_written)
+                    chunk = f_in.read(to_read)
+                    if not chunk: break
+                    f_out.write(chunk)
+                    bytes_written += len(chunk)
+                    
+            # 2. Write Validation Data
+            print("Writing val.bin...")
+            bytes_written = 0
+            with open(val_path, 'wb') as f_out:
+                while bytes_written < val_size_bytes:
+                    to_read = min(chunk_size, val_size_bytes - bytes_written)
+                    chunk = f_in.read(to_read)
+                    if not chunk: break
+                    f_out.write(chunk)
+                    bytes_written += len(chunk)
+                    
+            # 3. Write Test Data
+            print("Writing test.bin...")
+            bytes_written = 0
+            with open(test_path, 'wb') as f_out:
+                while bytes_written < test_size_bytes:
+                    to_read = min(chunk_size, test_size_bytes - bytes_written)
+                    chunk = f_in.read(to_read)
+                    if not chunk: break
+                    f_out.write(chunk)
+                    bytes_written += len(chunk)
+
+        print("Successfully completed splitting binary data!")
+
+# # Replace with your actual binary file path
+# split_binary_file("path_to_your_fineweb_file.bin", val_size_mb=500, test_size_mb=500, bytes_per_token=2)
+
 
 if __name__ == "__main__":
     tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
     output_dir = "assets/processed_data/finewebedu"
     os.makedirs(output_dir, exist_ok=True)
-    split = "test"
+    split = "train"
     start_time = time.time()
     # DataUtils.tokenize_data(
     #     # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
@@ -98,7 +160,9 @@ if __name__ == "__main__":
     DataUtils.tokenize_data(
         # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
         # raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/10BT/{split}/"),
-        raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/{split}/"),
+        # raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/{split}/"),
+        # raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/sample_{split}"),
+        raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/{split}"),
         output_binary_path=os.path.join(output_dir, f"{split}.bin"), 
         tokenizer=tokenizer
     )
