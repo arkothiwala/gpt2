@@ -17,7 +17,7 @@ class CompletionRequest(BaseModel):
     temperature: float = 1.0
     top_p: float = 1.0
     stream: bool = False
-    stop: list[str] | str | None = None
+    stop: list[str] | str | None = ['<|endoftext|>']
 
 
 @completion_router.post("/v1/completions")
