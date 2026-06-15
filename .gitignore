@@ -51,3 +51,4 @@ training_runs/
 nohup.out
 wandb/
 *temp*
+assets/models/*
