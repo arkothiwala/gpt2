@@ -37,8 +37,12 @@ class CustomMultiHeadAttention(torch.nn.Module):
     def forward(self, x: torch.Tensor):
         batch_size, seq_len, d_model = x.shape
         x = self.in_proj(x) # (batch_size, seq_len, 3*d_model)
-        x = x.reshape(batch_size, seq_len, 3, self.n_heads, self.d_attention).permute(0, 3, 1, 4, 2).contiguous()
-        q,k,v = torch.unbind(x, dim=-1)
+        x = x.reshape(batch_size, seq_len, 3, self.n_heads, self.d_attention).permute(2, 0, 3, 1, 4).contiguous()
+        q,k,v = torch.unbind(x, dim=0)
+        # print(f"q.is_contiguous() = {q.is_contiguous()} | q.dtype = {q.dtype} | q.shape={q.shape}")
+        # print(f"k.is_contiguous() = {k.is_contiguous()} | k.dtype = {k.dtype} | k.shape={k.shape}")
+        # print(f"v.is_contiguous() = {v.is_contiguous()} | v.dtype = {v.dtype} | v.shape={v.shape}")
+        # with torch.backends.cuda.sdp_kernel(enable_flash=True, enable_math=False, enable_mem_efficient=True):
         out = torch.nn.functional.scaled_dot_product_attention(
             query=q,
             key=k,
