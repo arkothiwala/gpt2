@@ -160,38 +160,26 @@ if __name__ == '__main__':
     os.makedirs(checkpoint_dir, exist_ok=True)
     logger = CustomLogger.get_logger(base_dir=exp_dir)
 
-    import torch._logging
-    torch._dynamo.reset()
+    # import torch._logging
+    # torch._dynamo.reset()
 
-    # 1. Setup a file handler for the specific file
-    torch_logs_file_handler = logging.FileHandler(f"{exp_dir}/pytorch_compiler.log", mode="w")
-    torch_logs_file_handler.setLevel(logging.DEBUG)
-    formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
-    torch_logs_file_handler.setFormatter(formatter)
+    # # 1. Setup a file handler for the specific file
+    # torch_logs_file_handler = logging.FileHandler(f"{exp_dir}/pytorch_compiler.log", mode="w")
+    # torch_logs_file_handler.setLevel(logging.DEBUG)
+    # formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    # torch_logs_file_handler.setFormatter(formatter)
 
-    # 2. Attach the file handler to the core PyTorch compiler loggers
-    for logger_name in ["torch", "torch._dynamo", "torch._functorch", "torch._inductor"]:
-        torch_logger = logging.getLogger(logger_name)
-        torch_logger.addHandler(torch_logs_file_handler)
-        torch_logger.propagate = True  # Stops logs from leaking into your main console output
+    # # 2. Attach the file handler to the core PyTorch compiler loggers
+    # for logger_name in ["torch", "torch._dynamo", "torch._functorch", "torch._inductor"]:
+    #     torch_logger = logging.getLogger(logger_name)
+    #     torch_logger.addHandler(torch_logs_file_handler)
+    #     torch_logger.propagate = True  # Stops logs from leaking into your main console output
 
-    # 3. Define what specific graph elements you want to log
-    torch._logging.set_logs(
-        aot_graphs=True,       # Captures forward/backward graphs
-        graph_breaks=True      # Captures where the graph splits
-    )
-
-    # Test the setup
-    @torch.compile
-    def foo(x):
-        return torch.sin(x) + 1
-    
-    x = torch.randn(3, 3)
-    foo(x)
-    print("testing torch.compile")
-    # torch_logs_file_handler.flush()
-    # torch_logs_file_handler.close()
-    # raise NotImplementedError
+    # # 3. Define what specific graph elements you want to log
+    # torch._logging.set_logs(
+    #     aot_graphs=True,       # Captures forward/backward graphs
+    #     graph_breaks=True      # Captures where the graph splits
+    # )
     
     #########################################################################
     ############################## Load Config ##############################
@@ -372,22 +360,22 @@ if __name__ == '__main__':
         input_ids = torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)
         logger.debug(model(x=input_ids).shape)
         
-        # PROFILER to check and confirm if flash attention is being used or not.
-        from torch.profiler import profile, ProfilerActivity
+    #     # PROFILER to check and confirm if flash attention is being used or not.
+    #     from torch.profiler import profile, ProfilerActivity
 
-        with torch.amp.autocast('cuda', dtype=autocast_dtype):
-            with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
-                output = model(input_ids)
-        del output
-        gc.collect()
-        torch.cuda.empty_cache()
-        log_gpu_memory(logger, "after profiling")
+    #     with torch.amp.autocast('cuda', dtype=autocast_dtype):
+    #         with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
+    #             output = model(input_ids)
+    #     del output
+    #     gc.collect()
+    #     torch.cuda.empty_cache()
+    #     log_gpu_memory(logger, "after profiling")
 
-        # Look for flash attention kernels
-        logger.info("checking profiler events for attention kernels")
-        for event in prof.key_averages():
-            if "attention" in event.key.lower() or "flash" in event.key.lower() or "sdpa" in event.key.lower():
-                logger.info(event.__dict__)#.key, event.cuda_time_total)
+    #     # Look for flash attention kernels
+    #     logger.info("checking profiler events for attention kernels")
+    #     for event in prof.key_averages():
+    #         if "attention" in event.key.lower() or "flash" in event.key.lower() or "sdpa" in event.key.lower():
+    #             logger.info(event.__dict__)#.key, event.cuda_time_total)
       
 
     ########################################################################
@@ -459,6 +447,10 @@ if __name__ == '__main__':
     # for epoch in tqdm(range(exp_config.get("training").get("epochs")), desc="epoch progress"):
     # set model in the training model
     model.train()
+    # model.half()
+    # for module in model.modules():
+    #   if isinstance(module, torch.nn.LayerNorm):
+    #       module.float()
     # model.compile() if torch.cuda.is_available() else model
     log_gpu_memory(logger, "before torch.compile")
     model = torch.compile(model) if torch.cuda.is_available() else model
@@ -541,6 +533,17 @@ if __name__ == '__main__':
       )
       profiler.start()
 
+    # Hook to detect any fp32 ops during a forward pass
+    def dtype_hook(module, input, output):
+        for i, t in enumerate(input):
+            if isinstance(t, torch.Tensor) and t.dtype == torch.float32:
+                print(f"{module.__class__.__name__} | input[{i}] is fp32")
+        if isinstance(output, torch.Tensor) and output.dtype == torch.float32:
+            print(f"{module.__class__.__name__} | output is fp32")
+
+    # for module in model.modules():
+    #     module.register_forward_hook(dtype_hook)
+
     for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_iter, desc="epoch's batch progress"), start=batch_idx_start):
         batch_size = batch_x_train.shape[0]
         total_accumulated += batch_size
@@ -563,7 +566,7 @@ if __name__ == '__main__':
         # forward pass
             
         if autocast_dtype in [torch.float16, torch.bfloat16]:
-            with sdpa_kernel(backends=[SDPBackend.MATH]):
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
                 with autocast(device_type=device.type, dtype=autocast_dtype):
                     log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass with autocast")
                     batch_logits = model(batch_x_train)
@@ -607,7 +610,7 @@ if __name__ == '__main__':
               # profiler.export_chrome_trace(f"{exp_dir}/profiler/trace.json")
               print(profiler.key_averages().table(sort_by="cuda_time_total", row_limit=50))
               with open(f"{exp_dir}/profiler/trace.txt", "w") as f:
-                f.write(prof.key_averages().table(sort_by="cuda_time_total", row_limit=150000, max_name_column_width=200))
+                f.write(profiler.key_averages().table(sort_by="cuda_time_total", row_limit=150000, max_name_column_width=200))
               break
         
 
