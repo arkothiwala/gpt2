@@ -17,6 +17,7 @@ class TransformerBlock(torch.nn.Module):
         self.context_length = context_length
         self.logger = logger
         self.layer_norm_mha = TorchLayerNorm(normalized_shape=self.d_model)
+        # self.MHA = torch.nn.MultiheadAttention(
         self.MHA = CustomMultiHeadAttention(
             embed_dim=self.d_model, 
             num_heads=self.n_heads,
