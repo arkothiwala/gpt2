@@ -33,7 +33,7 @@ class GPT2Model(torch.nn.Module):
         # self.embedding_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         # self.transformer_layers = torch.nn.Sequential()
         self.transformer_layers = torch.nn.ModuleList()
-        self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
+        # self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         # add sequential layers
         for layer in range(self.n_layers):
             self.transformer_layers.append(
@@ -142,8 +142,8 @@ class GPT2Model(torch.nn.Module):
         for block in self.transformer_layers:
             x_layer = torch.utils.checkpoint.checkpoint(block, x_layer, use_reentrant=False)
         # self.logger.debug(f"z.shape = {x_logits.shape} | z.device = {x_logits.device} | z.dtype = {x_logits.dtype}")
-        x_logits = self.final_layer_norm(x_layer)
-        x_logits = x_logits@self.embedding.weight.T
+        # x_logits = self.final_layer_norm(x_layer)
+        x_logits = x_layer@self.embedding.weight.T
         # self.logger.debug(f"x_logits.shape = {x_logits.shape} | x_logits.device = {x_logits.device} | x_logits.dtype = {x_logits.dtype}")
         if return_proba:
             return torch.nn.functional.softmax(input=x_logits, dim=-1)
