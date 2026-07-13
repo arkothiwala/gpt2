@@ -51,3 +51,5 @@ training_runs/
 nohup.out
 wandb/
 *temp*
+assets/models/*
+torch_compile_debug/*

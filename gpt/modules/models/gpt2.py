@@ -31,7 +31,8 @@ class GPT2Model(torch.nn.Module):
         )
         # self.position_embedding = SinusoidalPositionalEmbeddings(d_model=self.d_model, max_seq_len=self.context_length)
         # self.embedding_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
-        self.transformer_layers = torch.nn.Sequential()
+        # self.transformer_layers = torch.nn.Sequential()
+        self.transformer_layers = torch.nn.ModuleList()
         self.final_layer_norm = TorchLayerNorm(normalized_shape=self.d_model)
         # add sequential layers
         for layer in range(self.n_layers):
@@ -46,7 +47,7 @@ class GPT2Model(torch.nn.Module):
                 )
             )
         # add final layer normalization
-        self.transformer_layers.append(self.final_layer_norm)
+        # self.transformer_layers.append(self.final_layer_norm)
         # predict token with softmax
         # self.transformer_layers.append(torch.nn.Linear(in_features=self.d_model, out_features=self.vocab_size))
         self.dropout = torch.nn.Dropout(p=0.1)
@@ -135,8 +136,13 @@ class GPT2Model(torch.nn.Module):
         # self.logger.info(f"post layer norm - x_embeddings.var = {str(x_embeddings.var().item())} | x_embeddings.mean = {str(x_embeddings.mean().item())}")
         # x_embeddings = torch.nn.functional.dropout(input=x_embeddings, p=0.1) # MISTAKE - I had initially used functional dropout here w/o train v/s inference mode check. Moving it to Dropout module which internally manages train v/s inference mode and also makes code cleaner.
         x_embeddings = self.dropout(x_embeddings)
-        x_logits = self.transformer_layers(x_embeddings)
+        # x_logits = self.transformer_layers(x_embeddings)
+        # x_logits = torch.utils.checkpoint.checkpoint(self.transformer_layers, x_embeddings, use_reentrant=False)
+        x_layer = x_embeddings
+        for block in self.transformer_layers:
+            x_layer = torch.utils.checkpoint.checkpoint(block, x_layer, use_reentrant=False)
         # self.logger.debug(f"z.shape = {x_logits.shape} | z.device = {x_logits.device} | z.dtype = {x_logits.dtype}")
+        x_logits = self.final_layer_norm(x_layer)
         x_logits = x_logits@self.embedding.weight.T
         # self.logger.debug(f"x_logits.shape = {x_logits.shape} | x_logits.device = {x_logits.device} | x_logits.dtype = {x_logits.dtype}")
         if return_proba:

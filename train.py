@@ -18,13 +18,37 @@ from datetime import datetime
 import logging
 import math
 import random
+import gc
 torch.set_float32_matmul_precision('high')
+# torch._logging.set_logs(graph_code=True)
 
 # Remove basicConfig to avoid conflict with custom handlers
 # logging.basicConfig(level=logging.DEBUG)
 
 # Specific override for a noisy library
 logging.getLogger('multiprocessing').setLevel(logging.INFO)
+
+def log_gpu_memory(logger, tag: str, device=None):
+    """Log GPU memory at any point in training."""
+    if not torch.cuda.is_available():
+        return
+    
+    device = device or torch.cuda.current_device()
+    
+    allocated   = torch.cuda.memory_allocated(device) / 1024**3      # actively used
+    reserved    = torch.cuda.memory_reserved(device) / 1024**3       # held by allocator (includes fragmentation)
+    max_alloc   = torch.cuda.max_memory_allocated(device) / 1024**3  # peak since last reset
+    free, total = torch.cuda.mem_get_info(device)
+    free        = free / 1024**3
+    total       = total / 1024**3
+    
+    logger.info(
+        f"[VRAM | {tag}] "
+        f"alloc={allocated:.2f}GB | "
+        f"reserved={reserved:.2f}GB | "
+        f"peak={max_alloc:.2f}GB | "
+        f"free={free:.2f}GB / {total:.2f}GB"
+    )
 
 def validate_experiment_config(config):
     global_batch_size = config.get("training").get("global_batch_size")
@@ -123,6 +147,8 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument("--model_yaml", help="configs/<exp_config>.yaml file path")
     parser.add_argument("--checkpoint_path", default=None, help="checkpoint path to resume training from")
+    parser.add_argument("--profile", default=False, help="whether to run profiler or not")
+    parser.add_argument("--profile_steps", default=10, type=int, help="number of stpes to run during profiling")
     args = parser.parse_args()
 
     # Experiment config and logger
@@ -133,7 +159,27 @@ if __name__ == '__main__':
     checkpoint_dir = os.path.join(exp_dir, "checkpoints")
     os.makedirs(checkpoint_dir, exist_ok=True)
     logger = CustomLogger.get_logger(base_dir=exp_dir)
-    
+
+    # import torch._logging
+    # torch._dynamo.reset()
+
+    # # 1. Setup a file handler for the specific file
+    # torch_logs_file_handler = logging.FileHandler(f"{exp_dir}/pytorch_compiler.log", mode="w")
+    # torch_logs_file_handler.setLevel(logging.DEBUG)
+    # formatter = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+    # torch_logs_file_handler.setFormatter(formatter)
+
+    # # 2. Attach the file handler to the core PyTorch compiler loggers
+    # for logger_name in ["torch", "torch._dynamo", "torch._functorch", "torch._inductor"]:
+    #     torch_logger = logging.getLogger(logger_name)
+    #     torch_logger.addHandler(torch_logs_file_handler)
+    #     torch_logger.propagate = True  # Stops logs from leaking into your main console output
+
+    # # 3. Define what specific graph elements you want to log
+    # torch._logging.set_logs(
+    #     aot_graphs=True,       # Captures forward/backward graphs
+    #     graph_breaks=True      # Captures where the graph splits
+    # )
     
     #########################################################################
     ############################## Load Config ##############################
@@ -153,6 +199,8 @@ if __name__ == '__main__':
         autocast_dtype = torch.float16
     else:
         autocast_dtype = None
+    autocast_dtype = torch.float16
+    print(f"autocast_dtype = {autocast_dtype}")
     
     #########################################################################
     ############################ load checkpoint ############################
@@ -204,7 +252,10 @@ if __name__ == '__main__':
             context_length=exp_config.get("model").get("context_length"),
             logger=logger
         )
+
+    log_gpu_memory(logger, "before model.to(device)")
     model.to(device)
+    log_gpu_memory(logger, "after model.to(device)")
     logger.info("loaded total {} parameters".format(sum(p.numel() for p in model.parameters())))
     logger.debug(model.parameters)
     logger.debug(f"Model parameters device: {next(model.parameters()).device}")
@@ -243,17 +294,17 @@ if __name__ == '__main__':
         shuffle=True,
         # sampler: Sampler | Iterable | None = None,
         # batch_sampler: Sampler[Sequence] | Iterable[Sequence] | None = None,
-        # num_workers=exp_config.get("training").get("dataloader_num_workers"),
-        # collate_fn = None,
-        # pin_memory = True if torch.cuda.is_available() else False,
+        num_workers=exp_config.get("training").get("dataloader_num_workers"),
+        collate_fn = None,
+        pin_memory = True if torch.cuda.is_available() else False,
         drop_last = True,
         # timeout = 0,
-        # worker_init_fn = DataUtils.worker_init_fn,
+        worker_init_fn = DataUtils.worker_init_fn,
         # multiprocessing_context = None,
         # generator = None,
-        # prefetch_factor = exp_config.get("data").get("prefetch_factor"),
+        prefetch_factor = exp_config.get("data").get("prefetch_factor"),
         # persistent_workers = True,
-        # pin_memory_device = "cuda" if torch.cuda.is_available() else ''
+        pin_memory_device = "cuda" if torch.cuda.is_available() else ''
     )
 
     valid_dl = DataLoader(
@@ -305,21 +356,27 @@ if __name__ == '__main__':
     batch[1] = batch[1].to(device)
 
     with torch.no_grad():
+        log_gpu_memory(logger, "before profiling")
         input_ids = torch.randint(low=1, high=model.vocab_size, size=(2,512), device=device)
         logger.debug(model(x=input_ids).shape)
         
-        # PROFILER to check and confirm if flash attention is being used or not.
-        from torch.profiler import profile, ProfilerActivity
+    #     # PROFILER to check and confirm if flash attention is being used or not.
+    #     from torch.profiler import profile, ProfilerActivity
 
-        with torch.amp.autocast('cuda', dtype=torch.bfloat16):
-            with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
-                output = model(input_ids)
+    #     with torch.amp.autocast('cuda', dtype=autocast_dtype):
+    #         with profile(activities=[ProfilerActivity.CUDA], record_shapes=True) as prof:
+    #             output = model(input_ids)
+    #     del output
+    #     gc.collect()
+    #     torch.cuda.empty_cache()
+    #     log_gpu_memory(logger, "after profiling")
 
-        # Look for flash attention kernels
-        logger.info("checking profiler events for attention kernels")
-        for event in prof.key_averages():
-            if "attention" in event.key.lower() or "flash" in event.key.lower() or "sdpa" in event.key.lower():
-                logger.info(event.__dict__)#.key, event.cuda_time_total)
+    #     # Look for flash attention kernels
+    #     logger.info("checking profiler events for attention kernels")
+    #     for event in prof.key_averages():
+    #         if "attention" in event.key.lower() or "flash" in event.key.lower() or "sdpa" in event.key.lower():
+    #             logger.info(event.__dict__)#.key, event.cuda_time_total)
+      
 
     ########################################################################
     #################### Optim + LR Scheduler Config #######################
@@ -327,6 +384,7 @@ if __name__ == '__main__':
 
 
     if exp_config.get("optimizer").get("type") == "adamw":
+        log_gpu_memory(logger, "before optimizer")
         optimizer = torch.optim.AdamW(
             params=model.parameters(),
             lr = exp_config.get("optimizer").get("lr"),
@@ -336,10 +394,12 @@ if __name__ == '__main__':
                 exp_config.get("optimizer").get("beta2")
             ),
         )
+        log_gpu_memory(logger, "after optimizer")
 
     total_optimizer_steps = len(train_ds) // exp_config.get("training").get("global_batch_size")
     logger.info(f"Total optimizer steps per epoch: {total_optimizer_steps}")
     cosine_ann_steps = total_optimizer_steps - exp_config.get("scheduler").get("warmup_steps")
+    log_gpu_memory(logger, "before LR schedular")
     lr_scheduler = torch.optim.lr_scheduler.SequentialLR(
         optimizer=optimizer,
         schedulers=[
@@ -356,6 +416,7 @@ if __name__ == '__main__':
         ],
         milestones=[exp_config.get("scheduler").get("warmup_steps")],
     )
+    log_gpu_memory(logger, "after LR schedular")
 
     if args.checkpoint_path is not None:
         if checkpoint.get('scheduler_state_dict', None) is not None:
@@ -386,7 +447,22 @@ if __name__ == '__main__':
     # for epoch in tqdm(range(exp_config.get("training").get("epochs")), desc="epoch progress"):
     # set model in the training model
     model.train()
-    model.compile() if torch.cuda.is_available() else model
+    # model.half()
+    # for module in model.modules():
+    #   if isinstance(module, torch.nn.LayerNorm):
+    #       module.float()
+    # model.compile() if torch.cuda.is_available() else model
+    log_gpu_memory(logger, "before torch.compile")
+    model = torch.compile(model) if torch.cuda.is_available() else model
+    with torch.no_grad():
+      out = model(input_ids)     # compilation is triggered on first run
+      # logger.debug("torch._dynamo.utils.compile_times()")
+      # logger.debug(torch._dynamo.utils.compile_times())
+      log_gpu_memory(logger, "after torch.compile")
+      del input_ids, out
+      gc.collect()
+      torch.cuda.empty_cache()
+    log_gpu_memory(logger, "after torch.compile and deletion")
     grad_scaler = GradScaler() if torch.cuda.is_available() else None
     # run_lr_finder(
     #     model=model, 
@@ -422,6 +498,52 @@ if __name__ == '__main__':
         logger.info(f"Advancing dataloader to batch index {batch_idx_start} to resume training")
         for _ in tqdm(range(batch_idx_start), desc="Advancing dataloader progress"):
             next(train_iter)
+
+    import torch
+
+    # Print the data type of each parameter group
+    for name, param in model.named_parameters():
+        print(f"Layer: {name} | Dtype: {param.dtype}")
+
+    # Quick assertion test to check if ALL parameters are BF16
+    # is_pure_bf16 = all(p.dtype == torch.bfloat16 for p in model.parameters())
+    from collections import Counter
+    model_param_dtypes = [p.dtype for p in model.parameters()]
+    model_param_dtypes_distribution = Counter(model_param_dtypes)
+    
+    print(f"model_param_dtypes_distribution: {model_param_dtypes_distribution}")
+    log_gpu_memory(logger, "before starting training loop")
+
+    if args.profile:
+      profiler_schedule = torch.profiler.schedule(
+        wait=2,     # skip first 2 steps (warmup noise)
+        warmup=2,   # warmup profiler for 2 steps
+        active=3,   # capture 3 steps
+        repeat=1
+      )
+
+      profiler = torch.profiler.profile(
+          activities=[torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
+          schedule=torch.profiler.schedule(wait=2, warmup=2, active=3),
+          on_trace_ready=torch.profiler.tensorboard_trace_handler(f"{exp_dir}/profiler"),
+          record_shapes=True,
+          profile_memory=True,
+          with_stack=True,
+          with_flops=True,
+      )
+      profiler.start()
+
+    # Hook to detect any fp32 ops during a forward pass
+    def dtype_hook(module, input, output):
+        for i, t in enumerate(input):
+            if isinstance(t, torch.Tensor) and t.dtype == torch.float32:
+                print(f"{module.__class__.__name__} | input[{i}] is fp32")
+        if isinstance(output, torch.Tensor) and output.dtype == torch.float32:
+            print(f"{module.__class__.__name__} | output is fp32")
+
+    # for module in model.modules():
+    #     module.register_forward_hook(dtype_hook)
+
     for batch_idx, (batch_x_train, batch_y_train) in enumerate(tqdm(train_iter, desc="epoch's batch progress"), start=batch_idx_start):
         batch_size = batch_x_train.shape[0]
         total_accumulated += batch_size
@@ -433,6 +555,7 @@ if __name__ == '__main__':
         batch_y_train = batch_y_train.to(device=device) if torch.cuda.is_available() else batch_y_train
         
         logger.debug(f"batch_x_train.dtype = {batch_x_train.dtype} | batch_y_train.dtype = {batch_y_train.dtype}")
+        logger.debug(f"batch_x_train.shape = {batch_x_train.shape} | batch_y_train.shape = {batch_y_train.shape}")
 
         # print(f"batch_x_train.max() = {batch_x_train.max().max()}")
         
@@ -443,18 +566,24 @@ if __name__ == '__main__':
         # forward pass
             
         if autocast_dtype in [torch.float16, torch.bfloat16]:
-            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
+            with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
                 with autocast(device_type=device.type, dtype=autocast_dtype):
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass with autocast")
                     batch_logits = model(batch_x_train)
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass with autocast")
                     micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss calculation")
                     micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
+                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss_scaled calculation")
         else:
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass without autocast")
             batch_logits = model(batch_x_train)
             # micro_batch_loss = cross_entropy_loss(input=batch_logits.permute(0,2,1).contiguous(), target=batch_y_train)
             # batch_logits = batch_logits.to(device='cpu') if not torch.cuda.is_available() else batch_logits
             # batch_y_train = batch_y_train.to(device='cpu')
             micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
             micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass without autocast")
             
         if autocast_dtype == torch.float16:
             micro_batch_loss_scaled = grad_scaler.scale(micro_batch_loss_scaled)
@@ -468,6 +597,21 @@ if __name__ == '__main__':
         global_logits_max += batch_logits.max(dim=-1).values.mean().item()
         global_logits_min += batch_logits.min(dim=-1).values.mean().item()
         global_logits_mean += batch_logits.mean(dim=-1).mean().item()
+        log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and before batch logits del")
+        del batch_logits
+        gc.collect()
+        torch.cuda.empty_cache()
+        log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and batch logits del")
+
+        if args.profile:
+          profiler.step()
+          if batch_idx >= args.profile_steps:
+              profiler.stop()
+              # profiler.export_chrome_trace(f"{exp_dir}/profiler/trace.json")
+              print(profiler.key_averages().table(sort_by="cuda_time_total", row_limit=50))
+              with open(f"{exp_dir}/profiler/trace.txt", "w") as f:
+                f.write(profiler.key_averages().table(sort_by="cuda_time_total", row_limit=150000, max_name_column_width=200))
+              break
         
 
         # handle gradient accumulation
@@ -484,25 +628,25 @@ if __name__ == '__main__':
                 perplexity = math.exp(global_batch_loss)
             except OverflowError:
                 perplexity = float('inf')
-            unclipped_grad_norm_early = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
-            unclipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
-            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} | unclipped_grad_norm = {unclipped_grad_norm}")
+            # unclipped_grad_norm_early = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
+            # unclipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
+            logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} ")#| unclipped_grad_norm = {unclipped_grad_norm}")
             
-            paramwise_grad_stats = get_parameterwise_grad_stats(model)
-            paramwise_total_grad_norm = torch.linalg.vector_norm(torch.tensor(list(paramwise_grad_stats.values())), ord=2)
+            # paramwise_grad_stats = get_parameterwise_grad_stats(model)
+            # paramwise_total_grad_norm = torch.linalg.vector_norm(torch.tensor(list(paramwise_grad_stats.values())), ord=2)
             
             wandb.log({
                 "train/loss": global_batch_loss.item() if isinstance(global_batch_loss, torch.Tensor) else global_batch_loss,
                 "train/perplexity": perplexity,
                 "train/learning_rate": optimizer.param_groups[0]['lr'],
-                "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
+                # "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
                 "train/step": global_step,
                 "train/logits_variance": global_logits_variance,
                 "train/logits_max": global_logits_max,
                 "train/logits_min": global_logits_min,
                 "train/logits_mean": global_logits_mean,
-                **paramwise_grad_stats,
-                "train/derived_grad_norm": paramwise_total_grad_norm.item() if isinstance(paramwise_total_grad_norm, torch.Tensor) else paramwise_total_grad_norm
+                # **paramwise_grad_stats,
+                # "train/derived_grad_norm": paramwise_total_grad_norm.item() if isinstance(paramwise_total_grad_norm, torch.Tensor) else paramwise_total_grad_norm
 
             })
             
@@ -517,12 +661,14 @@ if __name__ == '__main__':
             torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=exp_config.get("training").get("max_grad_norm"), error_if_nonfinite=False)
             
             # take optimizer step and update the lr scheduler
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | before optimizer step")
             if autocast_dtype == torch.float16:
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
                 optimizer.step()
             lr_scheduler.step()
+            log_gpu_memory(logger, f"batch_idx={batch_idx} | after optimizer step")
             optimizer.zero_grad(set_to_none=True)
 
             global_step += 1

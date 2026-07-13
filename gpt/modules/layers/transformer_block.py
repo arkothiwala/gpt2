@@ -3,6 +3,7 @@ import collections
 import numpy as np
 from gpt.modules.embedding.sinusoidal import SinusoidalPositionalEmbeddings
 from gpt.modules.norm.layernorm import CustomLayerNorm
+from gpt.modules.layers.attention import CustomMultiHeadAttention
 from torch.nn import LayerNorm as TorchLayerNorm
 
 import logging
@@ -16,7 +17,8 @@ class TransformerBlock(torch.nn.Module):
         self.context_length = context_length
         self.logger = logger
         self.layer_norm_mha = TorchLayerNorm(normalized_shape=self.d_model)
-        self.MHA = torch.nn.MultiheadAttention(
+        # self.MHA = torch.nn.MultiheadAttention(
+        self.MHA = CustomMultiHeadAttention(
             embed_dim=self.d_model, 
             num_heads=self.n_heads,
             dropout=attention_dropout,
@@ -101,15 +103,18 @@ class TransformerBlock(torch.nn.Module):
         # self.logger.debug(f"x_layer_norm_mha.shape = {x_layer_norm_mha.shape} | x_layer_norm_mha.device = {x_layer_norm_mha.device} | x_layer_norm_mha.dtype = {x_layer_norm_mha.dtype}")
         # MISTAKE - initially I had not provided separate query, key and values arguments. Also, I wasn't selecting first value
         # This was because in my custom implementation of MHA, I wasn't taking three inputs in MHA.
-        x_post_mha, attention = self.MHA(
-            query=x_layer_norm_mha, 
-            key=x_layer_norm_mha, 
-            value=x_layer_norm_mha, 
-            # attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1, device=x.device).bool(), # not using is_causal=True because because using it along with need_weights=True is leading to silent or loud failures based on the pytorch version. Also, instead of float mask we are preparing boolean mask as it would consume much less memory, makes compute slightly faster and is recommended by PyTorch.
-            attn_mask=self.causal_mask[:seq_len, :seq_len], # using pre-registered buffer for causal mask. This would be more efficient as we are not creating the mask in every forward pass and also it would be on the same device as the model.
-            need_weights=False,
-            key_padding_mask=None, # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
-            is_causal=True # using built-in causal mask support in PyTorch which is more efficient and also works well with need_weights=True. This would automatically apply the causal mask to the attention scores before softmax.
+        # x_post_mha, attention = self.MHA(
+        #     query=x_layer_norm_mha, 
+        #     key=x_layer_norm_mha, 
+        #     value=x_layer_norm_mha, 
+        #     # attn_mask=torch.triu(torch.ones(seq_len, seq_len)*float("-inf"), diagonal=1, device=x.device).bool(), # not using is_causal=True because because using it along with need_weights=True is leading to silent or loud failures based on the pytorch version. Also, instead of float mask we are preparing boolean mask as it would consume much less memory, makes compute slightly faster and is recommended by PyTorch.
+        #     attn_mask=self.causal_mask[:seq_len, :seq_len], # using pre-registered buffer for causal mask. This would be more efficient as we are not creating the mask in every forward pass and also it would be on the same device as the model.
+        #     need_weights=False,
+        #     key_padding_mask=None, # given currently we are training models on full sequence length. This is additive mask. if key_padding_mask is boolean -> True is replaced with -inf and False is replaced with 0 in attention mask. if key_padding_mask is float -> values in key_padding_mask are directly added to attention mask. so we can directly provide key_padding_mask as attention mask for padding tokens.
+        #     is_causal=True # using built-in causal mask support in PyTorch which is more efficient and also works well with need_weights=True. This would automatically apply the causal mask to the attention scores before softmax.
+        # )
+        x_post_mha = self.MHA(
+            x=x_layer_norm_mha
         )
         # self.logger.debug(f"x_post_mha.dtype = {x_post_mha.dtype}")
         x_post_mha = x + self.dropout_residual_mha(x_post_mha)
