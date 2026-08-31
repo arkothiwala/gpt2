@@ -199,7 +199,7 @@ if __name__ == '__main__':
         autocast_dtype = torch.float16
     else:
         autocast_dtype = None
-    autocast_dtype = torch.float16
+    # autocast_dtype = torch.float16
     print(f"autocast_dtype = {autocast_dtype}")
     
     #########################################################################
@@ -230,7 +230,7 @@ if __name__ == '__main__':
 
     ################################################
     # Setting common variables
-    device = torch.device("cuda") if torch.cuda.is_available() else (torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu"))
+    device = torch.device("cuda", index=exp_config.get("device").get("gpu_index")) if torch.cuda.is_available() else (torch.device("mps") if torch.backends.mps.is_available() else torch.device("cpu"))
     # device = 'cpu'
     cross_entropy_loss = torch.nn.CrossEntropyLoss(ignore_index=-100, reduction='mean')
     global_batch_size = exp_config.get("training").get("global_batch_size")
@@ -303,7 +303,7 @@ if __name__ == '__main__':
         # multiprocessing_context = None,
         # generator = None,
         prefetch_factor = exp_config.get("data").get("prefetch_factor"),
-        # persistent_workers = True,
+        persistent_workers = True,
         pin_memory_device = "cuda" if torch.cuda.is_available() else ''
     )
 
@@ -383,7 +383,21 @@ if __name__ == '__main__':
     ########################################################################
 
 
-    if exp_config.get("optimizer").get("type") == "adamw":
+    if exp_config.get("optimizer").get("type") == "adam":
+        log_gpu_memory(logger, "before optimizer")
+        optimizer = torch.optim.Adam(
+            params=model.parameters(),
+            lr = exp_config.get("optimizer").get("lr"),
+            weight_decay = exp_config.get("optimizer").get("weight_decay"),
+            betas=(
+                exp_config.get("optimizer").get("beta1"),
+                exp_config.get("optimizer").get("beta2")
+            ),
+        )
+        log_gpu_memory(logger, "after optimizer")
+        logger.info(f"Using Adam optimizer with lr={exp_config.get('optimizer').get('lr')}, weight_decay={exp_config.get('optimizer').get('weight_decay')}, betas=({exp_config.get('optimizer').get('beta1')}, {exp_config.get('optimizer').get('beta2')})")
+
+    elif exp_config.get("optimizer").get("type") == "adamw":
         log_gpu_memory(logger, "before optimizer")
         optimizer = torch.optim.AdamW(
             params=model.parameters(),
@@ -395,6 +409,10 @@ if __name__ == '__main__':
             ),
         )
         log_gpu_memory(logger, "after optimizer")
+        logger.info(f"Using AdamW optimizer with lr={exp_config.get('optimizer').get('lr')}, weight_decay={exp_config.get('optimizer').get('weight_decay')}, betas=({exp_config.get('optimizer').get('beta1')}, {exp_config.get('optimizer').get('beta2')})")
+
+    else:
+        raise ValueError(f"Unsupported optimizer type: {exp_config.get('optimizer').get('type')}")
 
     total_optimizer_steps = len(train_ds) // exp_config.get("training").get("global_batch_size")
     logger.info(f"Total optimizer steps per epoch: {total_optimizer_steps}")
@@ -411,7 +429,8 @@ if __name__ == '__main__':
             ),
             torch.optim.lr_scheduler.CosineAnnealingLR(
                 optimizer=optimizer, 
-                T_max=cosine_ann_steps
+                T_max=cosine_ann_steps,
+                eta_min=exp_config.get("scheduler").get("cosine_annealing_min_lr_factor")*exp_config.get("optimizer").get("lr")
             )
         ],
         milestones=[exp_config.get("scheduler").get("warmup_steps")],
@@ -454,6 +473,7 @@ if __name__ == '__main__':
     # model.compile() if torch.cuda.is_available() else model
     log_gpu_memory(logger, "before torch.compile")
     model = torch.compile(model) if torch.cuda.is_available() else model
+    # model = torch.compile(model, mode="max-autotune") if torch.cuda.is_available() else model
     with torch.no_grad():
       out = model(input_ids)     # compilation is triggered on first run
       # logger.debug("torch._dynamo.utils.compile_times()")
@@ -551,11 +571,11 @@ if __name__ == '__main__':
         # print(f"pushing batch_x_train to {device}")
 
         # MISTAKE - I wasn't assigning it back to the variable leading to `RuntimeError: Placeholder storage has not been allocated on MPS device!`
-        batch_x_train = batch_x_train.to(device=device)
-        batch_y_train = batch_y_train.to(device=device) if torch.cuda.is_available() else batch_y_train
+        batch_x_train = batch_x_train.to(device=device, non_blocking=True)
+        batch_y_train = batch_y_train.to(device=device, non_blocking=True) if torch.cuda.is_available() else batch_y_train
         
-        logger.debug(f"batch_x_train.dtype = {batch_x_train.dtype} | batch_y_train.dtype = {batch_y_train.dtype}")
-        logger.debug(f"batch_x_train.shape = {batch_x_train.shape} | batch_y_train.shape = {batch_y_train.shape}")
+        # logger.debug(f"batch_x_train.dtype = {batch_x_train.dtype} | batch_y_train.dtype = {batch_y_train.dtype}")
+        # logger.debug(f"batch_x_train.shape = {batch_x_train.shape} | batch_y_train.shape = {batch_y_train.shape}")
 
         # print(f"batch_x_train.max() = {batch_x_train.max().max()}")
         
@@ -568,40 +588,59 @@ if __name__ == '__main__':
         if autocast_dtype in [torch.float16, torch.bfloat16]:
             with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION, SDPBackend.EFFICIENT_ATTENTION]):
                 with autocast(device_type=device.type, dtype=autocast_dtype):
-                    log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass with autocast")
+                    # log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass with autocast")
                     batch_logits = model(batch_x_train)
-                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass with autocast")
+                    # log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass with autocast")
                     micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
-                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss calculation")
+                    # log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss calculation")
                     micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
-                    log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss_scaled calculation")
+                    # log_gpu_memory(logger, f"batch_idx={batch_idx} | after micro_batch_loss_scaled calculation")
         else:
-            log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass without autocast")
+            # log_gpu_memory(logger, f"batch_idx={batch_idx} | before forward pass without autocast")
             batch_logits = model(batch_x_train)
             # micro_batch_loss = cross_entropy_loss(input=batch_logits.permute(0,2,1).contiguous(), target=batch_y_train)
             # batch_logits = batch_logits.to(device='cpu') if not torch.cuda.is_available() else batch_logits
             # batch_y_train = batch_y_train.to(device='cpu')
             micro_batch_loss = cross_entropy_loss(input=batch_logits.view(-1, batch_logits.size(-1)), target=batch_y_train.view(-1))
             micro_batch_loss_scaled = micro_batch_loss / accumulation_steps
-            log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass without autocast")
+            # log_gpu_memory(logger, f"batch_idx={batch_idx} | after forward pass without autocast")
             
         if autocast_dtype == torch.float16:
             micro_batch_loss_scaled = grad_scaler.scale(micro_batch_loss_scaled)
         micro_batch_loss_scaled.backward()
         assert batch_logits.device == batch_y_train.device, f"batch_logits device {batch_logits.device} and batch_y_train device {batch_y_train.device} are not the same"
         # print(f"micro_batch_loss.shape = {micro_batch_loss.shape}")
-        logger.debug(f"micro_batch_loss = {micro_batch_loss}")
+        # logger.debug(f"micro_batch_loss = {micro_batch_loss}")
 
-        global_batch_loss += micro_batch_loss.detach().item()
-        global_logits_variance += batch_logits.var(dim=-1).mean().item()
-        global_logits_max += batch_logits.max(dim=-1).values.mean().item()
-        global_logits_min += batch_logits.min(dim=-1).values.mean().item()
-        global_logits_mean += batch_logits.mean(dim=-1).mean().item()
-        log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and before batch logits del")
+        # global_batch_loss += micro_batch_loss.detach().item()
+        # detached_logits = batch_logits.detach()
+        # global_logits_variance += detached_logits.var(dim=-1).mean().item()
+        # global_logits_max += detached_logits.max(dim=-1).values.mean().item()
+        # global_logits_min += detached_logits.min(dim=-1).values.mean().item()
+        # global_logits_mean += detached_logits.mean(dim=-1).mean().item()
+
+        with torch.no_grad():
+            detached_logits = batch_logits.detach()
+            stats = torch.stack([
+                micro_batch_loss.detach(),
+                detached_logits.var(dim=-1).mean(),
+                detached_logits.max(dim=-1).values.mean(),
+                detached_logits.min(dim=-1).values.mean(),
+                detached_logits.mean(dim=-1).mean(),
+            ])
+            loss_v, var_v, max_v, min_v, mean_v = stats.tolist()  # one sync for all 5
+
+        global_batch_loss += loss_v
+        global_logits_variance += var_v
+        global_logits_max += max_v
+        global_logits_min += min_v
+        global_logits_mean += mean_v
+        # log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and before batch logits del")
         del batch_logits
-        gc.collect()
-        torch.cuda.empty_cache()
-        log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and batch logits del")
+        del detached_logits
+        # gc.collect()
+        # torch.cuda.empty_cache()
+        # log_gpu_memory(logger, f"batch_idx={batch_idx} | after loss calc and batch logits del")
 
         if args.profile:
           profiler.step()
@@ -629,23 +668,23 @@ if __name__ == '__main__':
             except OverflowError:
                 perplexity = float('inf')
             # unclipped_grad_norm_early = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
-            # unclipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
+            unclipped_grad_norm = torch.nn.utils.get_total_norm([p.grad for p in model.parameters() if p.grad is not None])
             logger.info(f"Step {global_step} | global_batch_loss = {global_batch_loss} | perplexity = {perplexity} | lr = {optimizer.param_groups[0]['lr']} ")#| unclipped_grad_norm = {unclipped_grad_norm}")
             
-            # paramwise_grad_stats = get_parameterwise_grad_stats(model)
+            paramwise_grad_stats = get_parameterwise_grad_stats(model)
             # paramwise_total_grad_norm = torch.linalg.vector_norm(torch.tensor(list(paramwise_grad_stats.values())), ord=2)
             
             wandb.log({
                 "train/loss": global_batch_loss.item() if isinstance(global_batch_loss, torch.Tensor) else global_batch_loss,
                 "train/perplexity": perplexity,
                 "train/learning_rate": optimizer.param_groups[0]['lr'],
-                # "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
+                "train/grad_norm": unclipped_grad_norm.item() if isinstance(unclipped_grad_norm, torch.Tensor) else unclipped_grad_norm,
                 "train/step": global_step,
                 "train/logits_variance": global_logits_variance,
                 "train/logits_max": global_logits_max,
                 "train/logits_min": global_logits_min,
                 "train/logits_mean": global_logits_mean,
-                # **paramwise_grad_stats,
+                **paramwise_grad_stats,
                 # "train/derived_grad_norm": paramwise_total_grad_norm.item() if isinstance(paramwise_total_grad_norm, torch.Tensor) else paramwise_total_grad_norm
 
             })
@@ -661,14 +700,14 @@ if __name__ == '__main__':
             torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=exp_config.get("training").get("max_grad_norm"), error_if_nonfinite=False)
             
             # take optimizer step and update the lr scheduler
-            log_gpu_memory(logger, f"batch_idx={batch_idx} | before optimizer step")
+            # log_gpu_memory(logger, f"batch_idx={batch_idx} | before optimizer step")
             if autocast_dtype == torch.float16:
                 grad_scaler.step(optimizer)
                 grad_scaler.update()
             else:
                 optimizer.step()
             lr_scheduler.step()
-            log_gpu_memory(logger, f"batch_idx={batch_idx} | after optimizer step")
+            # log_gpu_memory(logger, f"batch_idx={batch_idx} | after optimizer step")
             optimizer.zero_grad(set_to_none=True)
 
             global_step += 1
