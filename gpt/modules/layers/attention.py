@@ -48,7 +48,7 @@ class CustomMultiHeadAttention(torch.nn.Module):
             key=k,
             value=v,
             dropout_p=self.dropout if self.training else 0.0, 
-            is_causal=True
+            is_causal=False
         ).permute(
             0,2,1,3
         ).contiguous().reshape(
