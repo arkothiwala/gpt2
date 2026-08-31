@@ -26,19 +26,24 @@ scheduler:
   warmup_end_factor: 1.0
   warmup_steps: 500
   schedule: cosine
+  cosine_annealing_min_lr_factor: 0 # factor of the initial lr to set the min lr for cosine annealing schedule. For example, if initial lr is 0.0005 and this factor is 0.1, then min lr will be 0.00005.
+
+
+device:
+  gpu_index: 2
 
 # all configs for training loop
 training:
-  global_batch_size: 480
-  micro_batch_size: 12
-  epochs: 100
+  global_batch_size: 512
+  micro_batch_size: 16
+  epochs: 1
   valid_epoch_interval: 5
   test_epoch_interval: 5
   init_std: 0.02
   dataloader_num_workers: 2
-  checkpoint_interval: 100
+  checkpoint_interval: 1000
   max_grad_norm: 1
-  validation_interval: 50
+  validation_interval: 1000
 
 validation:
   global_batch_size: 1024
