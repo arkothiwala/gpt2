@@ -78,10 +78,18 @@ class DataUtils:
 
 if __name__ == "__main__":
     tokenizer = tiktoken.get_encoding(encoding_name="gpt2")
-    output_dir = "assets/processed_data/finewebedu"
+    dataset_name = "finewebedu"
+    output_dir = f"assets/processed_data/{dataset_name}"
     os.makedirs(output_dir, exist_ok=True)
     split = "test"
     start_time = time.time()
+
+    # cd ~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/10BT/,
+    # mkdir -p train val test
+    # mv 00{0..9}_00000.parquet 010_00000.parquet train/
+    # mv 011_00000.parquet val/
+    # mv 01{2..3}_00000.parquet test/
+
     # DataUtils.tokenize_data(
     #     # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
     #     raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--Skylion007--openwebtext/snapshots/b4325f019c648b1641a1784748667e8b74e5e064/{split}/"),
@@ -97,16 +105,16 @@ if __name__ == "__main__":
 
     DataUtils.tokenize_data(
         # raw_data_folder="/Users/ashutosh/personal/study/gpt/assets/raw_data", 
-        # raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/10BT/{split}/"),
-        raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/{split}/"),
-        output_binary_path=os.path.join(output_dir, f"{split}.bin"), 
+        raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/10BT/{split}/"),
+        # raw_data_folder=os.path.expanduser(f"~/.cache/huggingface/hub/datasets--HuggingFaceFW--fineweb-edu/snapshots/87f09149ef4734204d70ed1d046ddc9ca3f2b8f9/sample/{split}/"),
+        output_binary_path=os.path.join(output_dir, f"{dataset_name}_{split}.bin"), 
         tokenizer=tokenizer
     )
     DataUtils.create_eot_index(
-        tokenized_binary_path=os.path.join(output_dir, f"{split}.bin"),
+        tokenized_binary_path=os.path.join(output_dir, f"{dataset_name}_{split}.bin"),
         binfile_obj_dtype=np.uint16,
         query_value=tokenizer.eot_token,
-        output_index_path=os.path.join(output_dir, f"{split}_eot_index.bin")
+        output_index_path=os.path.join(output_dir, f"{dataset_name}_{split}_eot_index.bin")
     )
     end_time = time.time()
     print(f"Data tokenization and EoT index creation completed in {(end_time - start_time):.2f} seconds.")
